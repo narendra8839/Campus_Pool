@@ -1,3 +1,13 @@
+# Environment & Node
+.env
+.env.local
+.env.*
+!.env.example
+node_modules/
+backend/node_modules/
+backend/.env
+backend/.env.*
+
 # Miscellaneous
 *.class
 *.log

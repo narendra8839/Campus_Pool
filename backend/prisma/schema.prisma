@@ -1,0 +1,141 @@
+// Prisma schema for Campus Pool (Neon PostgreSQL)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id                String    @id @default(uuid())
+  name              String
+  email             String    @unique
+  password          String
+  phone             String
+  college           String?   @default("")
+  rollNumber        String?   @default("")
+  gender            String?   @default("prefer_not_to_say")
+  avatar            String?   @default("")
+  roles             String[]  @default(["rider", "driver"])
+  
+  // Vehicle Details
+  vehicleType       String?   @default("bike")
+  vehicleModel      String?   @default("")
+  vehiclePlate      String?   @default("")
+  vehicleColor      String?   @default("")
+  helmetProvided    Boolean   @default(true)
+  vehicleSeats      Int       @default(1)
+
+  // Emergency Contact
+  emergencyName     String?   @default("")
+  emergencyPhone    String?   @default("")
+  emergencyRelation String?   @default("")
+
+  // Rating Statistics
+  ratingAvg         Float     @default(5.0)
+  ratingCount       Int       @default(0)
+  isVerified        Boolean   @default(false)
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  ridesOffered      Ride[]    @relation("DriverRides")
+  bookings          Booking[] @relation("PassengerBookings")
+  reviewsGiven      Review[]  @relation("ReviewsGiven")
+  reviewsReceived   Review[]  @relation("ReviewsReceived")
+
+  @@map("users")
+}
+
+model Ride {
+  id              String    @id @default(uuid())
+  driverId        String
+  driver          User      @relation("DriverRides", fields: [driverId], references: [id], onDelete: Cascade)
+  
+  // Locations
+  originName      String
+  originAddress   String?   @default("")
+  originLat       Float?    @default(0.0)
+  originLng       Float?    @default(0.0)
+
+  destName        String
+  destAddress     String?   @default("")
+  destLat         Float?    @default(0.0)
+  destLng         Float?    @default(0.0)
+
+  waypoints       Json?     @default("[]")
+  departureTime   DateTime
+  
+  // Capacity & Ride Details
+  totalSeats      Int       @default(1)
+  availableSeats  Int       @default(1)
+  vehicleType     String    @default("bike")
+  helmetProvided  Boolean   @default(true)
+  contribution    Float     @default(0.0)
+  notes           String?   @default("")
+  status          String    @default("SCHEDULED") // SCHEDULED, ONGOING, COMPLETED, CANCELLED
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  bookings        Booking[]
+  reviews         Review[]
+
+  @@index([departureTime, status])
+  @@map("rides")
+}
+
+model Booking {
+  id                 String   @id @default(uuid())
+  rideId             String
+  ride               Ride     @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  passengerId        String
+  passenger          User     @relation("PassengerBookings", fields: [passengerId], references: [id], onDelete: Cascade)
+
+  // Pickup & Drop
+  pickupName         String
+  pickupLat          Float?   @default(0.0)
+  pickupLng          Float?   @default(0.0)
+  dropName           String
+  dropLat            Float?   @default(0.0)
+  dropLng            Float?   @default(0.0)
+
+  seatsRequested     Int      @default(1)
+  status             String   @default("PENDING") // PENDING, ACCEPTED, REJECTED, CANCELLED, COMPLETED
+  passengerNote      String?  @default("")
+  driverResponseNote String?  @default("")
+  fareAmount         Float    @default(0.0)
+  verificationOtp    String   @default("1234")
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([rideId, passengerId])
+  @@index([status])
+  @@map("bookings")
+}
+
+model Review {
+  id          String   @id @default(uuid())
+  rideId      String
+  ride        Ride     @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  reviewerId  String
+  reviewer    User     @relation("ReviewsGiven", fields: [reviewerId], references: [id], onDelete: Cascade)
+  revieweeId  String
+  reviewee    User     @relation("ReviewsReceived", fields: [revieweeId], references: [id], onDelete: Cascade)
+
+  rating      Int
+  comment     String?  @default("")
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([rideId, reviewerId, revieweeId])
+  @@map("reviews")
+}
