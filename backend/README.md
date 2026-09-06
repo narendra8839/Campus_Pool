@@ -41,6 +41,40 @@ backend/
 
 ---
 
+## 🌐 Environment Configuration
+
+We provide environment-specific template files for different deployment stages:
+
+| Environment | Template File | Description |
+|-------------|---------------|-------------|
+| Development | `.env.dev.template` | For local development |
+| Staging     | `.env.staging.template` | For staging server |
+| Production  | `.env.prod.template` | For production server |
+
+### Usage
+
+1. Copy the appropriate template to `.env`:
+   ```bash
+   # For development
+   cp .env.dev.template .env
+
+   # For staging
+   cp .env.staging.template .env
+
+   # For production
+   cp .env.prod.template .env
+   ```
+
+2. Fill in the actual values for your environment.
+
+### Important Notes
+
+- **Never commit `.env` files** to version control. They are already ignored by `.gitignore`.
+- Use environment-specific secrets and configurations.
+- Consider using a secrets manager or environment variables provided by your hosting platform for staging and production.
+
+---
+
 ## 🛠️ Quick Start & Setup
 
 ### 1. Prerequisites
@@ -158,6 +192,30 @@ POST /api/auth/register
 | :--- | :--- | :--- | :---: |
 | `POST` | `/api/reviews` | Post star rating (1-5) and feedback | Yes |
 | `GET` | `/api/reviews/user/:userId` | Get all reviews received by a user | No |
+
+---
+
+### 🚕 Auto Groups (`/api/auto-groups`)
+
+Version 1 coordinates students travelling from the same typed pickup area to the same typed destination within **15 minutes**. A group has up to four students and becomes ready at three members. It does **not** calculate fares, collect payments, or book an auto.
+
+| Method | Endpoint | Description | Auth Required |
+| :--- | :--- | :--- | :---: |
+| `POST` | `/api/auto-groups/requests` | Create a request and join/create a compatible group | Yes |
+| `GET` | `/api/auto-groups/my-groups` | View the current student's active groups | Yes |
+| `GET` | `/api/auto-groups/:id` | View a group the current student belongs to | Yes |
+| `PATCH` | `/api/auto-groups/:id/confirm` | Confirm attendance once the group is ready | Yes |
+| `PATCH` | `/api/auto-groups/:id/leave` | Leave an auto group | Yes |
+
+Example request:
+
+```json
+{
+  "pickupName": "Viman Nagar",
+  "destinationName": "College Main Gate",
+  "desiredDepartureTime": "2026-09-02T03:30:00.000Z"
+}
+```
 
 ---
 
