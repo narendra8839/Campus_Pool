@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:maplibre_gl/maplibre_gl.dart';
 import 'models/user_model.dart';
+import 'routes/app_navigator.dart';
+import 'routes/app_routes.dart';
 import 'screens/auth/login_screen.dart';
-import 'screens/home/home_dashboard_screen.dart';
+import 'screens/navigation/main_navigation_shell.dart';
+import 'services/api_service.dart';
 import 'services/auth_service.dart';
 import 'theme/app_colors.dart';
 import 'theme/app_theme.dart';
@@ -9,7 +13,27 @@ import 'theme/app_theme.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Hybrid composition avoids blank/black native map views on some Android
+  // devices and MIUI emulator images.
+  MapLibreMap.useHybridComposition = true;
+  ApiService.onUnauthorized = _handleExpiredSession;
   runApp(const CampusPoolApp());
+}
+
+Future<void> _handleExpiredSession() async {
+  await AuthService.logout();
+
+  final navigator = AppNavigator.key.currentState;
+  if (navigator == null) return;
+
+  navigator.pushNamedAndRemoveUntil(
+    AppRoutes.login,
+    (route) => false,
+    arguments: LoginRouteArguments(
+      returnRoute: AppNavigator.returnRoute,
+      sessionExpired: true,
+    ),
+  );
 }
 
 class CampusPoolApp extends StatelessWidget {
@@ -20,8 +44,11 @@ class CampusPoolApp extends StatelessWidget {
     return MaterialApp(
       title: 'Campus Pool',
       debugShowCheckedModeBanner: false,
+      navigatorKey: AppNavigator.key,
       theme: AppTheme.lightTheme,
       home: const AuthGate(),
+      routes: AppRoutes.routes,
+      onGenerateRoute: AppRoutes.onGenerateRoute,
     );
   }
 }
@@ -61,7 +88,7 @@ class _AuthGateState extends State<AuthGate> {
 
         final user = snapshot.data;
         if (user != null) {
-          return HomeDashboardScreen(userName: user.name);
+          return const MainNavigationShell(initialIndex: 0);
         }
 
         return const LoginScreen();

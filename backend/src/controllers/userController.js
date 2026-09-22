@@ -127,7 +127,16 @@ const updateVehicle = async (req, res, next) => {
     const { type, model, plateNumber, color, helmetProvided, totalSeats } = req.body;
 
     const dataToUpdate = {};
-    if (type !== undefined) dataToUpdate.vehicleType = type;
+    if (type !== undefined) {
+      const normalizedType = String(type).toLowerCase();
+      if (!['bike', 'scooty'].includes(normalizedType)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Only bike and scooty vehicles are supported',
+        });
+      }
+      dataToUpdate.vehicleType = normalizedType;
+    }
     if (model !== undefined) dataToUpdate.vehicleModel = model;
     if (plateNumber !== undefined) dataToUpdate.vehiclePlate = plateNumber;
     if (color !== undefined) dataToUpdate.vehicleColor = color;
@@ -158,8 +167,49 @@ const updateVehicle = async (req, res, next) => {
   }
 };
 
+const getMySchedule = async (req, res, next) => {
+  try {
+    const schedules = await prisma.studentSchedule.findMany({
+      where: { userId: req.user.id },
+      orderBy: { dayOfWeek: 'asc' },
+    });
+    res.json({ success: true, data: schedules });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const updateMySchedule = async (req, res, next) => {
+  try {
+    if (!Array.isArray(req.body.schedules)) {
+      return res.status(400).json({ success: false, message: 'schedules must be an array' });
+    }
+    const schedules = req.body.schedules.map((item) => ({
+      dayOfWeek: Number(item.dayOfWeek),
+      dayName: String(item.dayName || ''),
+      hasClass: Boolean(item.hasClass),
+      collegeStartTime: item.hasClass ? String(item.collegeStartTime || '') : null,
+      collegeEndTime: item.hasClass ? String(item.collegeEndTime || '') : null,
+      campusName: String(item.campusName || 'VIT College'),
+    }));
+    if (schedules.length !== 6 || schedules.some((item) => item.dayOfWeek < 1 || item.dayOfWeek > 6)) {
+      return res.status(400).json({ success: false, message: 'Provide exactly one valid schedule for Monday through Saturday' });
+    }
+    await prisma.$transaction(async (tx) => {
+      await tx.studentSchedule.deleteMany({ where: { userId: req.user.id } });
+      await tx.studentSchedule.createMany({ data: schedules.map((item) => ({ ...item, userId: req.user.id })) });
+    });
+    const saved = await prisma.studentSchedule.findMany({ where: { userId: req.user.id }, orderBy: { dayOfWeek: 'asc' } });
+    res.json({ success: true, data: saved });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getUserProfile,
   updateProfile,
   updateVehicle,
+  getMySchedule,
+  updateMySchedule,
 };

@@ -1,4 +1,5 @@
 const prisma = require('../config/prisma');
+const normalisePlace = (value) => value.trim().replace(/\s+/g, ' ').toLowerCase();
 
 // @desc    Request a lift / book a seat
 // @route   POST /api/bookings
@@ -58,6 +59,24 @@ const createBooking = async (req, res, next) => {
         success: false,
         message: `Only ${ride.availableSeats} seat(s) available`,
       });
+    }
+
+    if (ride.corridorId) {
+      const [pickup, drop, rideOrigin, rideDestination] = await Promise.all([
+        prisma.corridorHub.findFirst({ where: { corridorId: ride.corridorId, hub: { normalizedName: normalisePlace(pickupName) } } }),
+        prisma.corridorHub.findFirst({ where: { corridorId: ride.corridorId, hub: { normalizedName: normalisePlace(dropName) } } }),
+        prisma.corridorHub.findUnique({ where: { corridorId_hubId: { corridorId: ride.corridorId, hubId: ride.originHubId } } }),
+        prisma.corridorHub.findUnique({ where: { corridorId_hubId: { corridorId: ride.corridorId, hubId: ride.destinationHubId } } }),
+      ]);
+      const direction = new Date(ride.departureTime).getHours() < 12 ? 1 : -1;
+      const followsDirection = pickup && drop && (pickup.sequence - drop.sequence) * direction < 0;
+      const withinRide = rideOrigin && rideDestination &&
+        (direction === 1
+          ? pickup.sequence >= rideOrigin.sequence && drop.sequence <= rideDestination.sequence
+          : pickup.sequence <= rideOrigin.sequence && drop.sequence >= rideDestination.sequence);
+      if (!followsDirection || !withinRide) {
+        return res.status(400).json({ success: false, message: 'Pickup and drop must be hubs in corridor order' });
+      }
     }
 
     // Check existing active booking
@@ -362,10 +381,105 @@ const getRideBookings = async (req, res, next) => {
   }
 };
 
+// @desc    Get all booking requests for rides offered by the logged-in driver
+// @route   GET /api/bookings/driver-requests
+// @access  Private
+const getDriverBookings = async (req, res, next) => {
+  try {
+    const { status, rideId } = req.query;
+    const where = {
+      ride: { driverId: req.user.id },
+      ...(status ? { status } : {}),
+      ...(rideId ? { rideId } : {}),
+    };
+
+    const bookings = await prisma.booking.findMany({
+      where,
+      include: {
+        passenger: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            ratingAvg: true,
+            ratingCount: true,
+            avatar: true,
+            college: true,
+            rollNumber: true,
+            emergencyPhone: true,
+            isVerified: true,
+          },
+        },
+        ride: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json({
+      success: true,
+      count: bookings.length,
+      data: bookings,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Verify passenger boarding OTP
+// @route   POST /api/bookings/:id/verify-otp
+// @access  Private (Driver)
+const verifyBookingOtp = async (req, res, next) => {
+  try {
+    const { otp } = req.body;
+    const booking = await prisma.booking.findUnique({
+      where: { id: req.params.id },
+      include: { ride: true, passenger: true },
+    });
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: 'Booking not found',
+      });
+    }
+
+    if (booking.ride.driverId !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to verify OTP for this booking',
+      });
+    }
+
+    if (booking.status !== 'ACCEPTED') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot verify OTP for a ${booking.status.toLowerCase()} booking`,
+      });
+    }
+
+    if (booking.verificationOtp !== otp?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid OTP. Please check the 4-digit code provided by the passenger.',
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Passenger OTP verified successfully! Boarding confirmed.',
+      data: booking,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   createBooking,
   respondToBooking,
   cancelBooking,
   getMyBookings,
   getRideBookings,
+  getDriverBookings,
+  verifyBookingOtp,
 };

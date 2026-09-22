@@ -3,10 +3,14 @@
 .env.local
 .env.*
 !.env.example
+!.env.*.template
 node_modules/
 backend/node_modules/
 backend/.env
+backend/.env.local
+backend/.env.*.local
 backend/.env.*
+!backend/.env.*.template
 
 # Miscellaneous
 *.class

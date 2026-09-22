@@ -8,6 +8,8 @@ const userRoutes = require('./routes/userRoutes');
 const rideRoutes = require('./routes/rideRoutes');
 const bookingRoutes = require('./routes/bookingRoutes');
 const reviewRoutes = require('./routes/reviewRoutes');
+const autoGroupRoutes = require('./routes/autoGroupRoutes');
+const routeRoutes = require('./routes/routeRoutes');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 
 const app = express();
@@ -49,6 +51,8 @@ app.get('/api', (req, res) => {
       rides: '/api/rides',
       bookings: '/api/bookings',
       reviews: '/api/reviews',
+      autoGroups: '/api/auto-groups',
+      routes: '/api/routes/corridors',
     },
   });
 });
@@ -59,6 +63,8 @@ app.use('/api/users', userRoutes);
 app.use('/api/rides', rideRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/auto-groups', autoGroupRoutes);
+app.use('/api/routes', routeRoutes);
 
 // 404 & Error Handlers
 app.use(notFound);

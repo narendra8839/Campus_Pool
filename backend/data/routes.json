@@ -1,0 +1,57 @@
+{
+  "generatedFrom": [
+    "Corridor_1.txt",
+    "Corridor_2.txt",
+    "Hub_Corridor_Sequential_Order_COMPLETE.xlsx"
+  ],
+  "destination": {
+    "name": "VIT College",
+    "latitude": 18.4635,
+    "longitude": 73.8682
+  },
+  "corridors": [
+    {
+      "id": "swargate-vit",
+      "name": "Swargate - VIT College",
+      "sourceFile": "Corridor_1.txt",
+      "originName": "Swargate",
+      "destinationName": "VIT College",
+      "hubs": [
+        {"name": "Swargate PMPML Main Bus Stand", "latitude": 18.4991, "longitude": 73.8583, "type": "exclusive"},
+        {"name": "Swargate BRTS Stop", "latitude": 18.4982, "longitude": 73.8588, "type": "exclusive"},
+        {"name": "Laxmi Narayan Theatre", "latitude": 18.4965, "longitude": 73.8584, "type": "exclusive"},
+        {"name": "Panchami BRTS", "latitude": 18.4902, "longitude": 73.8586, "type": "exclusive"},
+        {"name": "City Pride BRTS", "latitude": 18.4845, "longitude": 73.8583, "type": "exclusive"},
+        {"name": "Market Yard Corner", "latitude": 18.4792, "longitude": 73.8581, "type": "junction"},
+        {"name": "Bibwewadi Bus Stop", "latitude": 18.4792, "longitude": 73.8615, "type": "shared"},
+        {"name": "Lower Indira Nagar Stop", "latitude": 18.4718, "longitude": 73.8618, "type": "shared"},
+        {"name": "Kashinath Patil Nagar Stop", "latitude": 18.4745, "longitude": 73.8631, "type": "shared"},
+        {"name": "Upper Indira Nagar Bus Depot", "latitude": 18.4682, "longitude": 73.8623, "type": "shared"},
+        {"name": "Chintamani Nagar", "latitude": 18.4651, "longitude": 73.864, "type": "shared"},
+        {"name": "VIT College", "latitude": 18.4635, "longitude": 73.8682, "type": "destination"}
+      ]
+    },
+    {
+      "id": "katraj-vit",
+      "name": "Katraj - VIT College",
+      "sourceFile": "Corridor_2.txt",
+      "originName": "Katraj",
+      "destinationName": "VIT College",
+      "hubs": [
+        {"name": "Katraj Terminal", "latitude": 18.4471, "longitude": 73.8562, "type": "exclusive"},
+        {"name": "Katraj Dairy BRTS", "latitude": 18.4508, "longitude": 73.8569, "type": "exclusive"},
+        {"name": "Bharati Vidyapeeth", "latitude": 18.456, "longitude": 73.8574, "type": "exclusive"},
+        {"name": "Balaji Nagar BRTS", "latitude": 18.4628, "longitude": 73.8577, "type": "exclusive"},
+        {"name": "KK Market BRTS", "latitude": 18.4683, "longitude": 73.8579, "type": "exclusive"},
+        {"name": "Shankar Maharaj Math", "latitude": 18.4735, "longitude": 73.8579, "type": "exclusive"},
+        {"name": "Market Yard Corner", "latitude": 18.4792, "longitude": 73.8581, "type": "junction"},
+        {"name": "Bibwewadi Bus Stop", "latitude": 18.4792, "longitude": 73.8615, "type": "shared"},
+        {"name": "Lower Indira Nagar Stop", "latitude": 18.4718, "longitude": 73.8618, "type": "shared"},
+        {"name": "Kashinath Patil Nagar Stop", "latitude": 18.4745, "longitude": 73.8631, "type": "shared"},
+        {"name": "Upper Indira Nagar Bus Depot", "latitude": 18.4682, "longitude": 73.8623, "type": "shared"},
+        {"name": "Chintamani Nagar", "latitude": 18.4651, "longitude": 73.864, "type": "shared"},
+        {"name": "VIT College", "latitude": 18.4635, "longitude": 73.8682, "type": "destination"}
+      ]
+    }
+  ]
+}

@@ -137,6 +137,54 @@ class AuthService {
     throw ApiException('Failed to retrieve user profile.');
   }
 
+  /// Update user profile on backend
+  static Future<UserModel> updateProfile({
+    String? name,
+    String? phone,
+    String? college,
+    String? rollNumber,
+    String? gender,
+    String? avatar,
+    String? emergencyName,
+    String? emergencyPhone,
+    String? emergencyRelation,
+  }) async {
+    final Map<String, dynamic> body = {};
+    if (name != null) body['name'] = name.trim();
+    if (phone != null) body['phone'] = phone.trim();
+    if (college != null) body['college'] = college.trim();
+    if (rollNumber != null) body['rollNumber'] = rollNumber.trim();
+    if (gender != null) body['gender'] = gender;
+    if (avatar != null) body['avatar'] = avatar;
+    if (emergencyName != null) body['emergencyName'] = emergencyName.trim();
+    if (emergencyPhone != null) body['emergencyPhone'] = emergencyPhone.trim();
+    if (emergencyRelation != null) body['emergencyRelation'] = emergencyRelation.trim();
+
+    final response = await ApiService.put(
+      '/users/profile',
+      requiresAuth: true,
+      body: body,
+    );
+
+    if (response is Map && response['success'] == true && response['data'] != null) {
+      final token = await ApiService.getToken();
+      final data = response['data'] as Map<String, dynamic>;
+
+      // Merge with cached user data to preserve fields like vehicle/roles if omitted in response
+      final current = _cachedUser;
+      final mergedJson = {
+        ...?current?.toJson(),
+        ...data,
+      };
+      final user = UserModel.fromJson(mergedJson, token: token);
+      await _saveLocalUser(user);
+      _cachedUser = user;
+      return user;
+    }
+
+    throw ApiException('Failed to update user profile.');
+  }
+
   /// Logout and clear stored credentials
   static Future<void> logout() async {
     await ApiService.clearToken();

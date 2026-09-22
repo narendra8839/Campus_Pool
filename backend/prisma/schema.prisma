@@ -11,110 +11,164 @@ datasource db {
 }
 
 model User {
-  id                String    @id @default(uuid())
-  name              String
-  email             String    @unique
-  password          String
-  phone             String
-  college           String?   @default("")
-  rollNumber        String?   @default("")
-  gender            String?   @default("prefer_not_to_say")
-  avatar            String?   @default("")
-  roles             String[]  @default(["rider", "driver"])
-  
+  id         String   @id @default(uuid())
+  name       String
+  email      String   @unique
+  password   String
+  phone      String
+  college    String?  @default("")
+  rollNumber String?  @default("")
+  gender     String?  @default("prefer_not_to_say")
+  avatar     String?  @default("")
+  roles      String[] @default(["rider", "driver"])
+
   // Vehicle Details
-  vehicleType       String?   @default("bike")
-  vehicleModel      String?   @default("")
-  vehiclePlate      String?   @default("")
-  vehicleColor      String?   @default("")
-  helmetProvided    Boolean   @default(true)
-  vehicleSeats      Int       @default(1)
+  vehicleType    String? @default("bike")
+  vehicleModel   String? @default("")
+  vehiclePlate   String? @default("")
+  vehicleColor   String? @default("")
+  helmetProvided Boolean @default(true)
+  vehicleSeats   Int     @default(1)
 
   // Emergency Contact
-  emergencyName     String?   @default("")
-  emergencyPhone    String?   @default("")
-  emergencyRelation String?   @default("")
+  emergencyName     String? @default("")
+  emergencyPhone    String? @default("")
+  emergencyRelation String? @default("")
 
   // Rating Statistics
-  ratingAvg         Float     @default(5.0)
-  ratingCount       Int       @default(0)
-  isVerified        Boolean   @default(false)
+  ratingAvg   Float   @default(5.0)
+  ratingCount Int     @default(0)
+  isVerified  Boolean @default(false)
 
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  ridesOffered      Ride[]    @relation("DriverRides")
-  bookings          Booking[] @relation("PassengerBookings")
-  reviewsGiven      Review[]  @relation("ReviewsGiven")
-  reviewsReceived   Review[]  @relation("ReviewsReceived")
+  ridesOffered     Ride[]            @relation("DriverRides")
+  bookings         Booking[]         @relation("PassengerBookings")
+  reviewsGiven     Review[]          @relation("ReviewsGiven")
+  reviewsReceived  Review[]          @relation("ReviewsReceived")
+  autoRequests     AutoRequest[]
+  autoGroupMembers AutoGroupMember[]
+  schedules        StudentSchedule[]
 
   @@map("users")
 }
 
+model Corridor {
+  id              String        @id @default(uuid())
+  name            String        @unique
+  sourceFile      String?
+  originName      String?
+  destinationName String?
+  routeData       Json?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  hubs            CorridorHub[]
+  rides           Ride[]
+
+  @@map("corridors")
+}
+
+model Hub {
+  id               String        @id @default(uuid())
+  name             String        @unique
+  normalizedName   String        @unique
+  latitude         Float?
+  longitude        Float?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  corridors        CorridorHub[]
+  originRides      Ride[]        @relation("RideOriginHub")
+  destinationRides Ride[]        @relation("RideDestinationHub")
+
+  @@map("hubs")
+}
+
+model CorridorHub {
+  id         String   @id @default(uuid())
+  corridorId String
+  hubId      String
+  sequence   Int
+  corridor   Corridor @relation(fields: [corridorId], references: [id], onDelete: Cascade)
+  hub        Hub      @relation(fields: [hubId], references: [id], onDelete: Cascade)
+
+  @@unique([corridorId, hubId])
+  @@unique([corridorId, sequence])
+  @@index([hubId])
+  @@map("corridor_hubs")
+}
+
 model Ride {
-  id              String    @id @default(uuid())
-  driverId        String
-  driver          User      @relation("DriverRides", fields: [driverId], references: [id], onDelete: Cascade)
-  
+  id               String    @id @default(uuid())
+  driverId         String
+  driver           User      @relation("DriverRides", fields: [driverId], references: [id], onDelete: Cascade)
+  corridorId       String?
+  corridor         Corridor? @relation(fields: [corridorId], references: [id], onDelete: SetNull)
+  originHubId      String?
+  originHub        Hub?      @relation("RideOriginHub", fields: [originHubId], references: [id], onDelete: SetNull)
+  destinationHubId String?
+  destinationHub   Hub?      @relation("RideDestinationHub", fields: [destinationHubId], references: [id], onDelete: SetNull)
+
   // Locations
-  originName      String
-  originAddress   String?   @default("")
-  originLat       Float?    @default(0.0)
-  originLng       Float?    @default(0.0)
+  originName    String
+  originAddress String? @default("")
+  originLat     Float?  @default(0.0)
+  originLng     Float?  @default(0.0)
 
-  destName        String
-  destAddress     String?   @default("")
-  destLat         Float?    @default(0.0)
-  destLng         Float?    @default(0.0)
+  destName    String
+  destAddress String? @default("")
+  destLat     Float?  @default(0.0)
+  destLng     Float?  @default(0.0)
 
-  waypoints       Json?     @default("[]")
-  departureTime   DateTime
-  
+  waypoints     Json?    @default("[]")
+  departureTime DateTime
+
   // Capacity & Ride Details
-  totalSeats      Int       @default(1)
-  availableSeats  Int       @default(1)
-  vehicleType     String    @default("bike")
-  helmetProvided  Boolean   @default(true)
-  contribution    Float     @default(0.0)
-  notes           String?   @default("")
-  status          String    @default("SCHEDULED") // SCHEDULED, ONGOING, COMPLETED, CANCELLED
+  totalSeats     Int     @default(1)
+  availableSeats Int     @default(1)
+  vehicleType    String  @default("bike")
+  helmetProvided Boolean @default(true)
+  contribution   Float   @default(0.0)
+  notes          String? @default("")
+  status         String  @default("SCHEDULED") // SCHEDULED, ONGOING, COMPLETED, CANCELLED
 
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  bookings        Booking[]
-  reviews         Review[]
+  bookings Booking[]
+  reviews  Review[]
 
   @@index([departureTime, status])
+  @@index([corridorId, departureTime])
   @@map("rides")
 }
 
 model Booking {
-  id                 String   @id @default(uuid())
-  rideId             String
-  ride               Ride     @relation(fields: [rideId], references: [id], onDelete: Cascade)
-  passengerId        String
-  passenger          User     @relation("PassengerBookings", fields: [passengerId], references: [id], onDelete: Cascade)
+  id          String @id @default(uuid())
+  rideId      String
+  ride        Ride   @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  passengerId String
+  passenger   User   @relation("PassengerBookings", fields: [passengerId], references: [id], onDelete: Cascade)
 
   // Pickup & Drop
-  pickupName         String
-  pickupLat          Float?   @default(0.0)
-  pickupLng          Float?   @default(0.0)
-  dropName           String
-  dropLat            Float?   @default(0.0)
-  dropLng            Float?   @default(0.0)
+  pickupName String
+  pickupLat  Float? @default(0.0)
+  pickupLng  Float? @default(0.0)
+  dropName   String
+  dropLat    Float? @default(0.0)
+  dropLng    Float? @default(0.0)
 
-  seatsRequested     Int      @default(1)
-  status             String   @default("PENDING") // PENDING, ACCEPTED, REJECTED, CANCELLED, COMPLETED
-  passengerNote      String?  @default("")
-  driverResponseNote String?  @default("")
-  fareAmount         Float    @default(0.0)
-  verificationOtp    String   @default("1234")
+  seatsRequested     Int     @default(1)
+  status             String  @default("PENDING") // PENDING, ACCEPTED, REJECTED, CANCELLED, COMPLETED
+  passengerNote      String? @default("")
+  driverResponseNote String? @default("")
+  fareAmount         Float   @default(0.0)
+  verificationOtp    String  @default("1234")
 
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([rideId, passengerId])
   @@index([status])
@@ -122,20 +176,94 @@ model Booking {
 }
 
 model Review {
-  id          String   @id @default(uuid())
-  rideId      String
-  ride        Ride     @relation(fields: [rideId], references: [id], onDelete: Cascade)
-  reviewerId  String
-  reviewer    User     @relation("ReviewsGiven", fields: [reviewerId], references: [id], onDelete: Cascade)
-  revieweeId  String
-  reviewee    User     @relation("ReviewsReceived", fields: [revieweeId], references: [id], onDelete: Cascade)
+  id         String @id @default(uuid())
+  rideId     String
+  ride       Ride   @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  reviewerId String
+  reviewer   User   @relation("ReviewsGiven", fields: [reviewerId], references: [id], onDelete: Cascade)
+  revieweeId String
+  reviewee   User   @relation("ReviewsReceived", fields: [revieweeId], references: [id], onDelete: Cascade)
 
-  rating      Int
-  comment     String?  @default("")
+  rating  Int
+  comment String? @default("")
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([rideId, reviewerId, revieweeId])
   @@map("reviews")
+}
+
+// A student request to coordinate a shared auto. No fare or payment data is
+// stored: the group only helps students find one another.
+model AutoRequest {
+  id                        String           @id @default(uuid())
+  userId                    String
+  user                      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pickupName                String
+  normalizedPickupName      String
+  destinationName           String
+  normalizedDestinationName String
+  desiredDepartureTime      DateTime
+  status                    String           @default("OPEN") // OPEN, MATCHED, CANCELLED
+  groupMember               AutoGroupMember?
+  createdAt                 DateTime         @default(now())
+  updatedAt                 DateTime         @updatedAt
+
+  @@index([normalizedPickupName, normalizedDestinationName, desiredDepartureTime, status])
+  @@index([userId, status])
+  @@map("auto_requests")
+}
+
+// A rule-based group of 3-4 students going from the same area to the same destination.
+model AutoGroup {
+  id                        String            @id @default(uuid())
+  pickupName                String
+  normalizedPickupName      String
+  destinationName           String
+  normalizedDestinationName String
+  departureTime             DateTime
+  maxMembers                Int               @default(4)
+  status                    String            @default("FORMING") // FORMING, READY, CONFIRMED, COMPLETED, CANCELLED
+  members                   AutoGroupMember[]
+  createdAt                 DateTime          @default(now())
+  updatedAt                 DateTime          @updatedAt
+
+  @@index([normalizedPickupName, normalizedDestinationName, departureTime, status])
+  @@map("auto_groups")
+}
+
+model AutoGroupMember {
+  id        String      @id @default(uuid())
+  groupId   String
+  group     AutoGroup   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requestId String      @unique
+  request   AutoRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  status    String      @default("JOINED") // JOINED, CONFIRMED, LEFT
+  joinedAt  DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@unique([groupId, userId])
+  @@index([groupId, status])
+  @@map("auto_group_members")
+}
+
+model StudentSchedule {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dayOfWeek        Int
+  dayName          String
+  hasClass         Boolean  @default(true)
+  collegeStartTime String?
+  collegeEndTime   String?
+  campusName       String   @default("VIT College")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([userId, dayOfWeek])
+  @@index([dayOfWeek, hasClass])
+  @@map("student_schedules")
 }

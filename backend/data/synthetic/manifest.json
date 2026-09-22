@@ -1,0 +1,19 @@
+{
+  "seed": 20260921,
+  "referenceDate": "2026-09-21T06:30:00.000Z",
+  "window": {
+    "start": "2026-08-08T06:30:00.000Z",
+    "end": "2026-11-05T06:30:00.000Z"
+  },
+  "counts": {
+    "users": 500,
+    "schedules": 3000,
+    "corridors": 2,
+    "hubs": 18,
+    "rides": 1000,
+    "bookings": 3000,
+    "reviews": 805,
+    "autoRequests": 600
+  },
+  "password": "CampusPool123!"
+}

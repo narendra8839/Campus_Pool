@@ -9,6 +9,10 @@
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:studio": "prisma studio",
+    "seed:routes": "node scripts/seed-routes.js",
+    "cleanup:four-wheelers": "node scripts/remove-four-wheelers.js",
+    "generate:synthetic": "node scripts/generate-synthetic-data.js",
+    "import:synthetic": "node scripts/import-synthetic-data.js",
     "db:test": "node test_db.js"
   },
   "keywords": [

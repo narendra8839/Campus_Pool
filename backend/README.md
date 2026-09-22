@@ -114,6 +114,141 @@ npm run prisma:studio
 npm run dev
 ```
 
+### Route catalogue and deterministic demo data
+
+The normalized route catalogue in `data/routes.json` is derived from
+`Corridor_1.txt`, `Corridor_2.txt`, and the hub-order workbook at the
+repository root. It is intentionally checked in so runtime seeding does not
+depend on an Excel parser. The catalogue models two directional VIT commute
+corridors:
+
+- Swargate -> shared Market Yard/Bibwewadi section -> VIT College
+- Katraj -> shared Market Yard/Bibwewadi section -> VIT College
+
+After `prisma db push`, run:
+
+```bash
+npm run seed:routes
+```
+
+The seed is deterministic and safe to rerun. It creates corridors, ordered
+corridor hubs, VIT users, morning/evening rides, a booking, review, and an
+auto-group. Seed accounts use `user1@seed.campus.pool` through
+`user8@seed.campus.pool` and password `CampusPool123!`. Route clients can
+read `GET /api/routes/corridors`; route-linked rides accept `corridorId`,
+`originHubId`, and `destinationHubId` while retaining the existing location
+fields.
+
+Only bikes and scooties can be offered. If an older database contains
+four-wheeler records, remove those rides and reset the associated vehicle
+details with:
+
+```bash
+npm run cleanup:four-wheelers
+```
+
+To generate larger deterministic JSON and CSV datasets for analysis or bulk
+loading, run:
+
+```bash
+npm run generate:synthetic
+```
+
+The output is written to `backend/data/synthetic/`. It contains 500 users,
+1,000 VIT commute rides, 3,000 valid route-segment bookings, reviews, and
+auto-group requests. The generator uses the corridor hub sequence to ensure
+morning rides end at VIT, evening rides start at VIT, and every booking stays
+within its ride segment.
+
+#### Route API shapes
+
+`GET /api/routes/corridors` returns:
+
+```json
+{
+  "success": true,
+  "count": 1,
+  "data": [{
+    "id": "corridor-id",
+    "name": "Corridor 1",
+    "originName": "Swargate",
+    "destinationName": "VIT College",
+    "hubs": [{
+      "id": "corridor-hub-id",
+      "corridorId": "corridor-id",
+      "hubId": "hub-id",
+      "sequence": 0,
+      "hub": {
+        "id": "hub-id",
+        "name": "VIT College",
+        "normalizedName": "vit campus",
+        "latitude": 18.5456,
+        "longitude": 73.8567
+      }
+    }]
+  }]
+}
+```
+
+`GET /api/routes/corridors/:id` returns `{ "success": true, "data": <corridor> }`
+with the same corridor shape. Route-linked ride responses retain all existing
+ride fields and add `corridor`, `originHub`, and `destinationHub`; each hub
+has `id`, `name`, `normalizedName`, `latitude`, and `longitude`.
+
+When creating a route-linked ride, send the existing ride payload plus:
+
+```json
+{
+  "corridorId": "corridor-id",
+  "originHubId": "hub-id",
+  "destinationHubId": "hub-id"
+}
+```
+
+### Synthetic route-aware data
+
+Generate an inspection-ready development dataset without writing to the
+database:
+
+```bash
+npm run generate:synthetic
+```
+
+The deterministic generator uses the normalized route catalogue and creates
+500 users, 1,000 rides, 3,000 bookings, 900 reviews, and 600 auto requests
+across a rolling 90-day window centered on September 21, 2026. It writes JSON and CSV files to
+`backend/data/synthetic/`, including a manifest, route catalogue, and
+relationship-linked entity files. Reviews are generated only for unique valid
+booking relationships, so the actual review count can be lower than the
+configured maximum of 900. The fixed synthetic account password is documented
+in the manifest and must not be reused outside test data. Synthetic rides and
+bookings model the campus commute only: each record is either `hub -> VIT
+College` or `VIT College -> hub`; intermediate hub-to-hub bookings are not
+generated. Each synthetic user also receives a Monday-Saturday recurring
+
+To apply the generated dataset to the configured PostgreSQL database:
+
+```bash
+npx prisma db push
+npm run import:synthetic
+```
+
+The import is repeatable: it replaces only prior synthetic/seed accounts and
+their dependent records, preserving unrelated real accounts and rides. Seed
+login accounts use emails `synthetic0001@synthetic.campus.pool` through
+`synthetic0500@synthetic.campus.pool` and password `CampusPool123!`. Each synthetic user also receives a Monday-Saturday recurring
+schedule with no-class days, a class window between 8:00 AM and 6:00 PM, and
+sessions lasting approximately 3-4 hours. Ride departure times are derived
+from that schedule: 30 minutes before class for travel to college and 15
+minutes after class for the return trip. The generated
+`student-schedules.json/csv` files are the planned input shape for future
+timetable uploads.
+
+Morning rides (before noon) must move from a lower corridor sequence toward
+VIT; evening rides must move from VIT toward a lower sequence. Bookings on
+route-linked rides must use corridor hub names for `pickupName` and `dropName`
+in the same direction.
+
 ---
 
 ## 📡 API Endpoints Reference

@@ -1,0 +1,245 @@
+[
+  {
+    "id": "swargate-vit",
+    "name": "Swargate - VIT College",
+    "sourceFile": "Corridor_1.txt",
+    "originName": "Swargate",
+    "destinationName": "VIT College",
+    "hubs": [
+      {
+        "id": "19cfadd2-1ff7-4a2f-b5e3-eeb73f44cc28",
+        "name": "Swargate PMPML Main Bus Stand",
+        "normalizedName": "swargate pmpml main bus stand",
+        "latitude": 18.4991,
+        "longitude": 73.8583,
+        "sequence": 1,
+        "type": "exclusive"
+      },
+      {
+        "id": "0c2d013a-9422-4c89-905f-4ec287ba2251",
+        "name": "Swargate BRTS Stop",
+        "normalizedName": "swargate brts stop",
+        "latitude": 18.4982,
+        "longitude": 73.8588,
+        "sequence": 2,
+        "type": "exclusive"
+      },
+      {
+        "id": "0095597e-ebd1-4f83-a6c0-a8e94be6a92b",
+        "name": "Laxmi Narayan Theatre",
+        "normalizedName": "laxmi narayan theatre",
+        "latitude": 18.4965,
+        "longitude": 73.8584,
+        "sequence": 3,
+        "type": "exclusive"
+      },
+      {
+        "id": "596f6d76-b8c5-4cf2-9058-1a1a334d424d",
+        "name": "Panchami BRTS",
+        "normalizedName": "panchami brts",
+        "latitude": 18.4902,
+        "longitude": 73.8586,
+        "sequence": 4,
+        "type": "exclusive"
+      },
+      {
+        "id": "570167fe-7324-46a2-9cf4-fbea6048e8be",
+        "name": "City Pride BRTS",
+        "normalizedName": "city pride brts",
+        "latitude": 18.4845,
+        "longitude": 73.8583,
+        "sequence": 5,
+        "type": "exclusive"
+      },
+      {
+        "id": "86e290a5-7e39-4f7a-805e-a6154d820f01",
+        "name": "Market Yard Corner",
+        "normalizedName": "market yard corner",
+        "latitude": 18.4792,
+        "longitude": 73.8581,
+        "sequence": 6,
+        "type": "junction"
+      },
+      {
+        "id": "3221d156-13e7-4834-84ce-848f49b87be2",
+        "name": "Bibwewadi Bus Stop",
+        "normalizedName": "bibwewadi bus stop",
+        "latitude": 18.4792,
+        "longitude": 73.8615,
+        "sequence": 7,
+        "type": "shared"
+      },
+      {
+        "id": "a80964b4-72f5-43de-ad1a-bdcb9fca796e",
+        "name": "Lower Indira Nagar Stop",
+        "normalizedName": "lower indira nagar stop",
+        "latitude": 18.4718,
+        "longitude": 73.8618,
+        "sequence": 8,
+        "type": "shared"
+      },
+      {
+        "id": "1bc21bdf-5bcc-4dd4-8140-eac24ae23b69",
+        "name": "Kashinath Patil Nagar Stop",
+        "normalizedName": "kashinath patil nagar stop",
+        "latitude": 18.4745,
+        "longitude": 73.8631,
+        "sequence": 9,
+        "type": "shared"
+      },
+      {
+        "id": "11cd5543-db39-4321-9f12-008b367d2ce1",
+        "name": "Upper Indira Nagar Bus Depot",
+        "normalizedName": "upper indira nagar bus depot",
+        "latitude": 18.4682,
+        "longitude": 73.8623,
+        "sequence": 10,
+        "type": "shared"
+      },
+      {
+        "id": "eb0d92a7-38aa-446a-9f38-091814ea3abd",
+        "name": "Chintamani Nagar",
+        "normalizedName": "chintamani nagar",
+        "latitude": 18.4651,
+        "longitude": 73.864,
+        "sequence": 11,
+        "type": "shared"
+      },
+      {
+        "id": "6c30c56b-74ce-4c24-a819-98b9ab6387f5",
+        "name": "VIT College",
+        "normalizedName": "vit college",
+        "latitude": 18.4635,
+        "longitude": 73.8682,
+        "sequence": 12,
+        "type": "destination"
+      }
+    ]
+  },
+  {
+    "id": "katraj-vit",
+    "name": "Katraj - VIT College",
+    "sourceFile": "Corridor_2.txt",
+    "originName": "Katraj",
+    "destinationName": "VIT College",
+    "hubs": [
+      {
+        "id": "86597dc2-00ef-475a-8a9a-daf0323897ca",
+        "name": "Katraj Terminal",
+        "normalizedName": "katraj terminal",
+        "latitude": 18.4471,
+        "longitude": 73.8562,
+        "sequence": 1,
+        "type": "exclusive"
+      },
+      {
+        "id": "876d2e4d-fad4-4ee2-916c-e5ad147030cf",
+        "name": "Katraj Dairy BRTS",
+        "normalizedName": "katraj dairy brts",
+        "latitude": 18.4508,
+        "longitude": 73.8569,
+        "sequence": 2,
+        "type": "exclusive"
+      },
+      {
+        "id": "ebb92112-ef31-4ebe-a259-4e999c52f0fd",
+        "name": "Bharati Vidyapeeth",
+        "normalizedName": "bharati vidyapeeth",
+        "latitude": 18.456,
+        "longitude": 73.8574,
+        "sequence": 3,
+        "type": "exclusive"
+      },
+      {
+        "id": "fea32ab3-d832-43d3-a3a0-788e8711526d",
+        "name": "Balaji Nagar BRTS",
+        "normalizedName": "balaji nagar brts",
+        "latitude": 18.4628,
+        "longitude": 73.8577,
+        "sequence": 4,
+        "type": "exclusive"
+      },
+      {
+        "id": "af5c22fe-11db-4392-b90e-85f946c0a37b",
+        "name": "KK Market BRTS",
+        "normalizedName": "kk market brts",
+        "latitude": 18.4683,
+        "longitude": 73.8579,
+        "sequence": 5,
+        "type": "exclusive"
+      },
+      {
+        "id": "0ad9adea-2c75-4d2a-86ae-34dcc0727788",
+        "name": "Shankar Maharaj Math",
+        "normalizedName": "shankar maharaj math",
+        "latitude": 18.4735,
+        "longitude": 73.8579,
+        "sequence": 6,
+        "type": "exclusive"
+      },
+      {
+        "id": "86e290a5-7e39-4f7a-805e-a6154d820f01",
+        "name": "Market Yard Corner",
+        "normalizedName": "market yard corner",
+        "latitude": 18.4792,
+        "longitude": 73.8581,
+        "sequence": 7,
+        "type": "junction"
+      },
+      {
+        "id": "3221d156-13e7-4834-84ce-848f49b87be2",
+        "name": "Bibwewadi Bus Stop",
+        "normalizedName": "bibwewadi bus stop",
+        "latitude": 18.4792,
+        "longitude": 73.8615,
+        "sequence": 8,
+        "type": "shared"
+      },
+      {
+        "id": "a80964b4-72f5-43de-ad1a-bdcb9fca796e",
+        "name": "Lower Indira Nagar Stop",
+        "normalizedName": "lower indira nagar stop",
+        "latitude": 18.4718,
+        "longitude": 73.8618,
+        "sequence": 9,
+        "type": "shared"
+      },
+      {
+        "id": "1bc21bdf-5bcc-4dd4-8140-eac24ae23b69",
+        "name": "Kashinath Patil Nagar Stop",
+        "normalizedName": "kashinath patil nagar stop",
+        "latitude": 18.4745,
+        "longitude": 73.8631,
+        "sequence": 10,
+        "type": "shared"
+      },
+      {
+        "id": "11cd5543-db39-4321-9f12-008b367d2ce1",
+        "name": "Upper Indira Nagar Bus Depot",
+        "normalizedName": "upper indira nagar bus depot",
+        "latitude": 18.4682,
+        "longitude": 73.8623,
+        "sequence": 11,
+        "type": "shared"
+      },
+      {
+        "id": "eb0d92a7-38aa-446a-9f38-091814ea3abd",
+        "name": "Chintamani Nagar",
+        "normalizedName": "chintamani nagar",
+        "latitude": 18.4651,
+        "longitude": 73.864,
+        "sequence": 12,
+        "type": "shared"
+      },
+      {
+        "id": "6c30c56b-74ce-4c24-a819-98b9ab6387f5",
+        "name": "VIT College",
+        "normalizedName": "vit college",
+        "latitude": 18.4635,
+        "longitude": 73.8682,
+        "sequence": 13,
+        "type": "destination"
+      }
+    ]
+  }
+]

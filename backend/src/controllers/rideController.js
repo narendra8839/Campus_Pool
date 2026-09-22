@@ -1,11 +1,21 @@
 const prisma = require('../config/prisma');
 
+const routeInclude = {
+  corridor: {
+    include: {
+      hubs: { orderBy: { sequence: 'asc' }, include: { hub: true } },
+    },
+  },
+  originHub: true,
+  destinationHub: true,
+};
+
 // @desc    Create / Offer a new ride
 // @route   POST /api/rides
 // @access  Private
 const createRide = async (req, res, next) => {
   try {
-    const {
+    let {
       originName,
       originAddress,
       originLat,
@@ -21,6 +31,9 @@ const createRide = async (req, res, next) => {
       helmetProvided,
       contribution,
       notes,
+      corridorId,
+      originHubId,
+      destinationHubId,
     } = req.body;
 
     if (!originName || !destName || !departureTime) {
@@ -38,11 +51,59 @@ const createRide = async (req, res, next) => {
       });
     }
 
-    const seats = parseInt(totalSeats, 10) || (vehicleType === 'car' ? 3 : 1);
+    const normalizedVehicleType = String(vehicleType || req.user.vehicleType || 'bike').toLowerCase();
+    if (!['bike', 'scooty'].includes(normalizedVehicleType)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Only bike and scooty vehicles are supported',
+      });
+    }
+
+    const seats = parseInt(totalSeats, 10);
+    if (!Number.isInteger(seats) || seats < 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'Capacity must be a whole number of at least 1 seat',
+      });
+    }
+
+    let routeLinks = {};
+    if (corridorId || originHubId || destinationHubId) {
+      if (!corridorId || !originHubId || !destinationHubId) {
+        return res.status(400).json({ success: false, message: 'corridorId, originHubId, and destinationHubId must be provided together' });
+      }
+      const [corridor, originLink, destinationLink] = await Promise.all([
+        prisma.corridor.findUnique({ where: { id: corridorId } }),
+        prisma.corridorHub.findUnique({
+          where: { corridorId_hubId: { corridorId, hubId: originHubId } },
+          include: { hub: true },
+        }),
+        prisma.corridorHub.findUnique({
+          where: { corridorId_hubId: { corridorId, hubId: destinationHubId } },
+          include: { hub: true },
+        }),
+      ]);
+      if (!corridor || !originLink || !destinationLink) {
+        return res.status(400).json({ success: false, message: 'The selected corridor and hubs must exist' });
+      }
+      const isMorning = depDate.getHours() < 12;
+      const direction = depDate.getHours() < 12 ? 1 : -1;
+      if ((originLink.sequence - destinationLink.sequence) * direction >= 0) {
+        return res.status(400).json({ success: false, message: 'Hubs must follow corridor order for the ride direction' });
+      }
+      routeLinks = { corridorId, originHubId, destinationHubId };
+      originName = originLink.hub.name;
+      destName = destinationLink.hub.name;
+      originLat = originLink.hub.latitude;
+      originLng = originLink.hub.longitude;
+      destLat = destinationLink.hub.latitude;
+      destLng = destinationLink.hub.longitude;
+    }
 
     const ride = await prisma.ride.create({
       data: {
         driverId: req.user.id,
+        ...routeLinks,
         originName,
         originAddress: originAddress || '',
         originLat: parseFloat(originLat) || 0.0,
@@ -55,12 +116,13 @@ const createRide = async (req, res, next) => {
         departureTime: depDate,
         totalSeats: seats,
         availableSeats: seats,
-        vehicleType: vehicleType || req.user.vehicleType || 'bike',
+        vehicleType: normalizedVehicleType,
         helmetProvided: helmetProvided !== undefined ? helmetProvided : req.user.helmetProvided ?? true,
         contribution: parseFloat(contribution) || 0.0,
         notes: notes || '',
       },
       include: {
+        ...routeInclude,
         driver: {
           select: {
             id: true,
@@ -102,6 +164,9 @@ const searchRides = async (req, res, next) => {
       seats = 1,
       page = 1,
       limit = 20,
+      corridorId,
+      originHubId,
+      destinationHubId,
     } = req.query;
 
     const where = {
@@ -119,7 +184,23 @@ const searchRides = async (req, res, next) => {
     }
 
     if (vehicleType) {
-      where.vehicleType = vehicleType;
+      const normalizedVehicleType = String(vehicleType).toLowerCase();
+      if (!['bike', 'scooty'].includes(normalizedVehicleType)) {
+        return res.json({ success: true, count: 0, total: 0, page: parseInt(page, 10), pages: 0, data: [] });
+      }
+      where.vehicleType = normalizedVehicleType;
+    } else {
+      where.vehicleType = { in: ['bike', 'scooty'] };
+    }
+
+    if (corridorId) {
+      where.corridorId = corridorId;
+    }
+    if (originHubId) {
+      where.originHubId = originHubId;
+    }
+    if (destinationHubId) {
+      where.destinationHubId = destinationHubId;
     }
 
     if (date) {
@@ -136,6 +217,7 @@ const searchRides = async (req, res, next) => {
       prisma.ride.findMany({
         where,
         include: {
+          ...routeInclude,
           driver: {
             select: {
               id: true,
@@ -179,6 +261,7 @@ const getRideById = async (req, res, next) => {
     const ride = await prisma.ride.findUnique({
       where: { id: req.params.id },
       include: {
+        ...routeInclude,
         driver: {
           select: {
             id: true,
@@ -237,6 +320,7 @@ const getMyOfferedRides = async (req, res, next) => {
     const rides = await prisma.ride.findMany({
       where: { driverId: req.user.id },
       include: {
+        ...routeInclude,
         bookings: {
           include: {
             passenger: {

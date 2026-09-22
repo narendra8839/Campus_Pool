@@ -5,14 +5,17 @@ import 'api_service.dart';
 
 class RideService {
   /// Search for rides based on query parameters
-  static Future<List<RideModel>> searchRides(Map<String, String> queryParams) async {
-    final response = await ApiService.get(
-      '/rides',
-      requiresAuth: true,
-    );
+  static Future<List<RideModel>> searchRides(
+    Map<String, String> queryParams,
+  ) async {
+    final query = queryParams.isEmpty
+        ? ''
+        : '?${Uri(queryParameters: queryParams).query}';
+    final response = await ApiService.get('/rides$query', requiresAuth: true);
 
-    if (response is List) {
-      return response.map((json) => RideModel.fromJson(json)).toList();
+    if (response is Map<String, dynamic> && response['data'] is List) {
+      final List<dynamic> data = response['data'];
+      return data.map((json) => RideModel.fromJson(json)).toList();
     } else {
       throw Exception('Unexpected response format');
     }
@@ -20,13 +23,11 @@ class RideService {
 
   /// Get details of a specific ride by ID
   static Future<RideModel> getRideDetail(String rideId) async {
-    final response = await ApiService.get(
-      '/rides/$rideId',
-      requiresAuth: true,
-    );
+    final response = await ApiService.get('/rides/$rideId', requiresAuth: true);
 
-    if (response is Map<String, dynamic>) {
-      return RideModel.fromJson(response);
+    if (response is Map<String, dynamic> &&
+        response['data'] is Map<String, dynamic>) {
+      return RideModel.fromJson(response['data']);
     } else {
       throw Exception('Unexpected response format');
     }
@@ -40,8 +41,9 @@ class RideService {
       requiresAuth: true,
     );
 
-    if (response is Map<String, dynamic>) {
-      return RideModel.fromJson(response);
+    if (response is Map<String, dynamic> &&
+        response['data'] is Map<String, dynamic>) {
+      return RideModel.fromJson(response['data']);
     } else {
       throw Exception('Unexpected response format');
     }
@@ -50,27 +52,32 @@ class RideService {
   /// Get rides for the current user
   static Future<List<RideModel>> getMyRides() async {
     final response = await ApiService.get(
-      '/rides/my',
+      '/rides/my-rides',
       requiresAuth: true,
     );
 
-    if (response is List) {
-      return response.map((json) => RideModel.fromJson(json)).toList();
+    if (response is Map<String, dynamic> && response['data'] is List) {
+      final List<dynamic> data = response['data'];
+      return data.map((json) => RideModel.fromJson(json)).toList();
     } else {
       throw Exception('Unexpected response format');
     }
   }
 
   /// Update the status of a ride
-  static Future<RideModel> updateRideStatus(String rideId, String status) async {
+  static Future<RideModel> updateRideStatus(
+    String rideId,
+    String status,
+  ) async {
     final response = await ApiService.patch(
       '/rides/$rideId/status',
       body: {'status': status},
       requiresAuth: true,
     );
 
-    if (response is Map<String, dynamic>) {
-      return RideModel.fromJson(response);
+    if (response is Map<String, dynamic> &&
+        response['data'] is Map<String, dynamic>) {
+      return RideModel.fromJson(response['data']);
     } else {
       throw Exception('Unexpected response format');
     }
@@ -78,13 +85,14 @@ class RideService {
 
   /// Cancel a ride
   static Future<RideModel> cancelRide(String rideId) async {
-    final response = await ApiService.patch(
-      '/rides/$rideId/cancel',
+    final response = await ApiService.delete(
+      '/rides/$rideId',
       requiresAuth: true,
     );
 
-    if (response is Map<String, dynamic>) {
-      return RideModel.fromJson(response);
+    if (response is Map<String, dynamic> &&
+        response['data'] is Map<String, dynamic>) {
+      return RideModel.fromJson(response['data']);
     } else {
       throw Exception('Unexpected response format');
     }
@@ -97,8 +105,9 @@ class RideService {
       requiresAuth: true,
     );
 
-    if (response is Map<String, dynamic>) {
-      return BookingModel.fromJson(response);
+    if (response is Map<String, dynamic> &&
+        response['data'] is Map<String, dynamic>) {
+      return BookingModel.fromJson(response['data']);
     } else {
       throw Exception('Unexpected response format');
     }
@@ -111,23 +120,28 @@ class RideService {
       requiresAuth: true,
     );
 
-    if (response is List) {
-      return response.map((json) => BookingModel.fromJson(json)).toList();
+    if (response is Map<String, dynamic> && response['data'] is List) {
+      final List<dynamic> data = response['data'];
+      return data.map((json) => BookingModel.fromJson(json)).toList();
     } else {
       throw Exception('Unexpected response format');
     }
   }
 
   /// Create a review for a ride
-  static Future<ReviewModel> createReview(String rideId, Map<String, dynamic> reviewData) async {
+  static Future<ReviewModel> createReview(
+    String rideId,
+    Map<String, dynamic> reviewData,
+  ) async {
     final response = await ApiService.post(
       '/rides/$rideId/reviews',
       body: reviewData,
       requiresAuth: true,
     );
 
-    if (response is Map<String, dynamic>) {
-      return ReviewModel.fromJson(response);
+    if (response is Map<String, dynamic> &&
+        response['data'] is Map<String, dynamic>) {
+      return ReviewModel.fromJson(response['data']);
     } else {
       throw Exception('Unexpected response format');
     }
@@ -140,8 +154,9 @@ class RideService {
       requiresAuth: true,
     );
 
-    if (response is List) {
-      return response.map((json) => ReviewModel.fromJson(json)).toList();
+    if (response is Map<String, dynamic> && response['data'] is List) {
+      final List<dynamic> data = response['data'];
+      return data.map((json) => ReviewModel.fromJson(json)).toList();
     } else {
       throw Exception('Unexpected response format');
     }

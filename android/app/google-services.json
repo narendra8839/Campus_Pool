@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1025626477422",
+    "project_id": "campuspool-afb48",
+    "storage_bucket": "campuspool-afb48.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1025626477422:android:50e7b4096b4382b298277f",
+        "android_client_info": {
+          "package_name": "com.example.campus_pool"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB66EPloZtqaYkHdG-Gn07BeWq4rsZNpng"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
