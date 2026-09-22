@@ -75,11 +75,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final returnRoute = loginArgs is LoginRouteArguments
           ? loginArgs.returnRoute
           : AppRoutes.home;
-      Navigator.pushNamedAndRemoveUntil(
-        context,
-        returnRoute,
-        (route) => false,
-      );
+      Navigator.pushNamedAndRemoveUntil(context, returnRoute, (route) => false);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -99,7 +95,9 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _showForgotPasswordDialog() {
-    final resetEmailController = TextEditingController(text: _emailController.text.trim());
+    final resetEmailController = TextEditingController(
+      text: _emailController.text.trim(),
+    );
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -114,7 +112,9 @@ class _LoginScreenState extends State<LoginScreen> {
           children: [
             Text(
               'Enter your registered campus email address and we will send you password reset instructions.',
-              style: AppTypography.bodySm.copyWith(color: AppColors.onSurfaceVariant),
+              style: AppTypography.bodySm.copyWith(
+                color: AppColors.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: AppSpacing.md),
             AppTextField(
@@ -131,7 +131,9 @@ class _LoginScreenState extends State<LoginScreen> {
             onPressed: () => Navigator.pop(ctx),
             child: Text(
               'Cancel',
-              style: AppTypography.labelMd.copyWith(color: AppColors.onSurfaceVariant),
+              style: AppTypography.labelMd.copyWith(
+                color: AppColors.onSurfaceVariant,
+              ),
             ),
           ),
           ElevatedButton(
@@ -139,7 +141,9 @@ class _LoginScreenState extends State<LoginScreen> {
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Password reset instructions sent to your email.'),
+                  content: Text(
+                    'Password reset instructions sent to your email.',
+                  ),
                   behavior: SnackBarBehavior.floating,
                   backgroundColor: AppColors.secondary,
                 ),
@@ -226,6 +230,8 @@ class _LoginScreenState extends State<LoginScreen> {
                             controller: _emailController,
                             label: 'Campus Email',
                             hintText: 'firstname.lastname@vit.edu',
+                            helperText:
+                                'Synthetic test accounts also use @synthetic.campus.pool',
                             keyboardType: TextInputType.emailAddress,
                             textInputAction: TextInputAction.next,
                             prefixIcon: const Icon(Icons.mail_outline_rounded),
@@ -234,8 +240,12 @@ class _LoginScreenState extends State<LoginScreen> {
                                 return 'Email is required';
                               }
                               final email = value.trim().toLowerCase();
-                              if (!email.endsWith('@vit.edu')) {
-                                return 'Please enter your @vit.edu email';
+                              final isCampusEmail = email.endsWith('@vit.edu');
+                              final isSyntheticEmail = email.endsWith(
+                                '@synthetic.campus.pool',
+                              );
+                              if (!isCampusEmail && !isSyntheticEmail) {
+                                return 'Use your @vit.edu email or a synthetic test account email';
                               }
                               return null;
                             },

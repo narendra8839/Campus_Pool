@@ -72,6 +72,12 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
   Future<void> _sendBookingRequest() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
+    if (_ride.availableSeats < _seatsToBook) {
+      _showBookingError('This ride no longer has enough available seats.');
+      await _fetchFreshDetails();
+      return;
+    }
+
     final pickup = _pickupController.text.trim();
     final drop = _dropController.text.trim();
     final note = _noteController.text.trim();
@@ -102,15 +108,24 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
       _showBookingSuccessDialog(booking.id);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to send booking request: $e'),
-          backgroundColor: AppColors.error,
-        ),
+      final message = e.toString().toLowerCase();
+      _showBookingError(
+        message.contains('only 0 seat') || message.contains('not enough seats')
+            ? 'This ride is full. Please choose another ride.'
+            : 'Failed to send booking request: $e',
       );
+      if (message.contains('only ') || message.contains('not enough seats')) {
+        await _fetchFreshDetails();
+      }
     } finally {
       if (mounted) setState(() => _isSubmittingBooking = false);
     }
+  }
+
+  void _showBookingError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: AppColors.error),
+    );
   }
 
   void _showBookingSuccessDialog(String bookingId) {
@@ -867,7 +882,6 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
   // ── Sticky Bottom Bar ─────────────────────────────────────────────────────
   Widget _buildStickyBottomBar(bool hasSeats, double totalFare) {
     return Container(
-      color: AppColors.surface,
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.marginMobile,
         vertical: AppSpacing.md,

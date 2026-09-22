@@ -147,12 +147,38 @@ details with:
 npm run cleanup:four-wheelers
 ```
 
+Fare is calculated by the backend at **₹5 per kilometre per passenger seat**.
+The distance is calculated from the ride waypoints when available, otherwise
+from the origin and destination coordinates. A booking's total is the
+per-seat route fare multiplied by the number of requested seats; client
+submitted contribution values are ignored.
+
 To generate larger deterministic JSON and CSV datasets for analysis or bulk
 loading, run:
 
 ```bash
 npm run generate:synthetic
 ```
+
+### Match acceptance NCF prototype
+
+Train the offline neural collaborative filtering prototype with:
+
+```bash
+npm run train:ncf
+```
+
+The trainer uses `ACCEPTED` and `COMPLETED` bookings as positive interactions,
+`REJECTED` bookings as negative interactions, and excludes `PENDING` and
+`CANCELLED` bookings. It writes ignored artifacts under
+`backend/ml/model-output/`, including evaluation metadata and a JSON prediction
+lookup used by ride search. Install the optional dependencies in
+`backend/ml/requirements-ml.txt` to train the PyTorch model.
+
+Authenticated `GET /api/rides` responses include
+`matchAcceptanceProbability` for each ride. The Flutter find-rides screen
+offers a **Best Match** sort option. Unknown rider-driver pairs use a
+rating-based fallback and are never blocked from booking.
 
 The output is written to `backend/data/synthetic/`. It contains 500 users,
 1,000 VIT commute rides, 3,000 valid route-segment bookings, reviews, and

@@ -11,7 +11,7 @@ import '../theme/app_typography.dart';
 import 'auto_groups/auto_groups_screen.dart';
 import 'ride_details_screen.dart';
 
-enum SortOption { earliest, lowestPrice, topRated }
+enum SortOption { bestMatch, earliest, lowestPrice, topRated }
 
 class FindRidesScreen extends StatefulWidget {
   const FindRidesScreen({
@@ -35,7 +35,7 @@ class _FindRidesScreenState extends State<FindRidesScreen> {
   String _dateFilterMode = 'any'; // 'any', 'today', 'tomorrow', 'custom'
   int _selectedSeats = 1;
   String _selectedVehicleType = 'all'; // 'all', 'bike', 'scooty'
-  SortOption _currentSort = SortOption.earliest;
+  SortOption _currentSort = SortOption.bestMatch;
 
   bool _isLoading = false;
   String? _errorMessage;
@@ -198,6 +198,13 @@ class _FindRidesScreenState extends State<FindRidesScreen> {
   List<RideModel> _applySorting(List<RideModel> rides) {
     final list = List<RideModel>.from(rides);
     switch (_currentSort) {
+      case SortOption.bestMatch:
+        list.sort(
+          (a, b) => (b.matchAcceptanceProbability ?? 0.0).compareTo(
+            a.matchAcceptanceProbability ?? 0.0,
+          ),
+        );
+        break;
       case SortOption.earliest:
         list.sort((a, b) => a.departureTime.compareTo(b.departureTime));
         break;
@@ -223,7 +230,7 @@ class _FindRidesScreenState extends State<FindRidesScreen> {
       _selectedDate = null;
       _selectedSeats = 1;
       _selectedVehicleType = 'all';
-      _currentSort = SortOption.earliest;
+      _currentSort = SortOption.bestMatch;
       _selectedCorridor = null;
     });
     _searchRides();
@@ -271,6 +278,17 @@ class _FindRidesScreenState extends State<FindRidesScreen> {
                 ),
               ),
               const SizedBox(height: AppSpacing.sm),
+              RadioListTile<SortOption>(
+                title: const Text('Best Match (Acceptance Probability)'),
+                value: SortOption.bestMatch,
+                groupValue: _currentSort,
+                activeColor: AppColors.primary,
+                contentPadding: EdgeInsets.zero,
+                onChanged: (val) {
+                  setModalState(() => _currentSort = val!);
+                  setState(() => _rides = _applySorting(_rides));
+                },
+              ),
               RadioListTile<SortOption>(
                 title: const Text('Earliest Departure Time'),
                 value: SortOption.earliest,
@@ -762,6 +780,9 @@ class _FindRidesScreenState extends State<FindRidesScreen> {
             vehicleModel: driver?.vehicleModel.isNotEmpty ?? false
                 ? driver!.vehicleModel
                 : ride.vehicleType,
+            matchPercentage: ride.matchAcceptanceProbability == null
+                ? null
+                : (ride.matchAcceptanceProbability! * 100).round(),
             status: RideStatusType.available,
             bookButtonText: 'Book Seat',
             onTap: () {

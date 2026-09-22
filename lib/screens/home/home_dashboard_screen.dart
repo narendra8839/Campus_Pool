@@ -24,11 +24,11 @@ import '../map/map_screen.dart';
 class HomeDashboardScreen extends StatefulWidget {
   const HomeDashboardScreen({
     super.key,
-    this.userName = 'Alex',
+    this.userName,
     this.embeddedInShell = false,
   });
 
-  final String userName;
+  final String? userName;
   final bool embeddedInShell;
 
   @override
@@ -41,15 +41,25 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   List<RideModel> _nearbyRides = const [];
   bool _isLoadingDashboard = true;
   String? _dashboardError;
+  String _displayName = 'there';
 
   @override
   void initState() {
     super.initState();
+    _displayName = widget.userName?.trim().isNotEmpty == true
+        ? widget.userName!.trim()
+        : (AuthService.cachedUser?.name.trim().isNotEmpty == true
+              ? AuthService.cachedUser!.name.trim()
+              : 'there');
     _loadDashboardData();
   }
 
   Future<void> _loadDashboardData() async {
     try {
+      final user = await AuthService.loadSession();
+      if (mounted && user?.name.trim().isNotEmpty == true) {
+        setState(() => _displayName = user!.name.trim());
+      }
       final results = await Future.wait<dynamic>([
         BookingService.listUserBookings(),
         RideService.searchRides({'limit': '5'}),
@@ -236,35 +246,35 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   setState(() => _currentNavIndex = index);
                 }
               },
-        items: const [
-          AppNavItem(
-            icon: Icons.home_outlined,
-            selectedIcon: Icons.home_rounded,
-            label: 'Home',
-          ),
-          AppNavItem(
-            icon: Icons.two_wheeler_outlined,
-            selectedIcon: Icons.two_wheeler_rounded,
-            label: 'Rides',
-          ),
-          AppNavItem(
-            icon: Icons.add_circle_outline_rounded,
-            selectedIcon: Icons.add_circle_rounded,
-            label: 'Offer',
-          ),
-          AppNavItem(
-            icon: Icons.notifications_none_rounded,
-            selectedIcon: Icons.notifications_rounded,
-            label: 'Alerts',
-            badgeCount: 2,
-          ),
-          AppNavItem(
-            icon: Icons.person_outline_rounded,
-            selectedIcon: Icons.person_rounded,
-            label: 'Profile',
-          ),
-        ],
-      ),
+              items: const [
+                AppNavItem(
+                  icon: Icons.home_outlined,
+                  selectedIcon: Icons.home_rounded,
+                  label: 'Home',
+                ),
+                AppNavItem(
+                  icon: Icons.two_wheeler_outlined,
+                  selectedIcon: Icons.two_wheeler_rounded,
+                  label: 'Rides',
+                ),
+                AppNavItem(
+                  icon: Icons.add_circle_outline_rounded,
+                  selectedIcon: Icons.add_circle_rounded,
+                  label: 'Offer',
+                ),
+                AppNavItem(
+                  icon: Icons.notifications_none_rounded,
+                  selectedIcon: Icons.notifications_rounded,
+                  label: 'Alerts',
+                  badgeCount: 2,
+                ),
+                AppNavItem(
+                  icon: Icons.person_outline_rounded,
+                  selectedIcon: Icons.person_rounded,
+                  label: 'Profile',
+                ),
+              ],
+            ),
     );
   }
 
@@ -285,7 +295,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Hi, ${widget.userName}! 👋',
+                'Hi, $_displayName! 👋',
                 style: AppTypography.headlineLgMobile.copyWith(
                   color: AppColors.onBackground,
                 ),
@@ -327,8 +337,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   ),
                   child: Center(
                     child: Text(
-                      widget.userName.isNotEmpty
-                          ? widget.userName[0].toUpperCase()
+                      _displayName.isNotEmpty
+                          ? _displayName[0].toUpperCase()
                           : 'U',
                       style: AppTypography.headlineSm.copyWith(
                         color: AppColors.onPrimary,
@@ -371,7 +381,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          widget.userName,
+                          _displayName,
                           style: AppTypography.labelMd.copyWith(
                             fontWeight: FontWeight.w700,
                             color: AppColors.onSurface,
@@ -442,9 +452,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       padding: const EdgeInsets.all(AppSpacing.md),
       onTap: () {
         Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const MapScreen()),
-    );
+          context,
+          MaterialPageRoute(builder: (_) => const MapScreen()),
+        );
       },
       child: Row(
         children: [
@@ -928,7 +938,8 @@ class _NotificationButton extends StatelessWidget {
             shape: const CircleBorder(),
             child: InkWell(
               customBorder: const CircleBorder(),
-              onTap: onTap ??
+              onTap:
+                  onTap ??
                   () {
                     Navigator.push(
                       context,

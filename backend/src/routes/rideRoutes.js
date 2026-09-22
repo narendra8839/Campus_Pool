@@ -11,7 +11,7 @@ const {
 const { protect } = require('../middleware/authMiddleware');
 
 router.route('/')
-  .get(searchRides)
+  .get(protect, searchRides)
   .post(protect, createRide);
 
 router.get('/my-rides', protect, getMyOfferedRides);

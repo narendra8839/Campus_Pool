@@ -51,7 +51,13 @@ const createBooking = async (req, res, next) => {
       });
     }
 
-    const requestedSeats = parseInt(seatsRequested, 10) || 1;
+    const requestedSeats = parseInt(seatsRequested, 10);
+    if (!Number.isInteger(requestedSeats) || requestedSeats < 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please request at least 1 seat',
+      });
+    }
 
     // Check available seats
     if (ride.availableSeats < requestedSeats) {
@@ -68,7 +74,7 @@ const createBooking = async (req, res, next) => {
         prisma.corridorHub.findUnique({ where: { corridorId_hubId: { corridorId: ride.corridorId, hubId: ride.originHubId } } }),
         prisma.corridorHub.findUnique({ where: { corridorId_hubId: { corridorId: ride.corridorId, hubId: ride.destinationHubId } } }),
       ]);
-      const direction = new Date(ride.departureTime).getHours() < 12 ? 1 : -1;
+      const direction = rideOrigin.sequence < rideDestination.sequence ? 1 : -1;
       const followsDirection = pickup && drop && (pickup.sequence - drop.sequence) * direction < 0;
       const withinRide = rideOrigin && rideDestination &&
         (direction === 1

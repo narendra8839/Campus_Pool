@@ -1,4 +1,6 @@
 const prisma = require('../config/prisma');
+const { fareForDistance, routeDistanceKilometres } = require('../utils/fareCalculator');
+const { rankRides } = require('../services/ncfService');
 
 const routeInclude = {
   corridor: {
@@ -73,7 +75,15 @@ const createRide = async (req, res, next) => {
         return res.status(400).json({ success: false, message: 'corridorId, originHubId, and destinationHubId must be provided together' });
       }
       const [corridor, originLink, destinationLink] = await Promise.all([
-        prisma.corridor.findUnique({ where: { id: corridorId } }),
+        prisma.corridor.findUnique({
+          where: { id: corridorId },
+          include: {
+            hubs: {
+              orderBy: { sequence: 'asc' },
+              include: { hub: true },
+            },
+          },
+        }),
         prisma.corridorHub.findUnique({
           where: { corridorId_hubId: { corridorId, hubId: originHubId } },
           include: { hub: true },
@@ -86,9 +96,7 @@ const createRide = async (req, res, next) => {
       if (!corridor || !originLink || !destinationLink) {
         return res.status(400).json({ success: false, message: 'The selected corridor and hubs must exist' });
       }
-      const isMorning = depDate.getHours() < 12;
-      const direction = depDate.getHours() < 12 ? 1 : -1;
-      if ((originLink.sequence - destinationLink.sequence) * direction >= 0) {
+      if (originLink.sequence === destinationLink.sequence) {
         return res.status(400).json({ success: false, message: 'Hubs must follow corridor order for the ride direction' });
       }
       routeLinks = { corridorId, originHubId, destinationHubId };
@@ -98,6 +106,15 @@ const createRide = async (req, res, next) => {
       originLng = originLink.hub.longitude;
       destLat = destinationLink.hub.latitude;
       destLng = destinationLink.hub.longitude;
+      if (!Array.isArray(waypoints) || waypoints.length < 2) {
+        waypoints = corridor.hubs
+          .filter(({ sequence }) => sequence >= Math.min(originLink.sequence, destinationLink.sequence)
+            && sequence <= Math.max(originLink.sequence, destinationLink.sequence))
+          .map(({ hub }) => ({
+          latitude: hub.latitude,
+          longitude: hub.longitude,
+          }));
+      }
     }
 
     const ride = await prisma.ride.create({
@@ -118,7 +135,11 @@ const createRide = async (req, res, next) => {
         availableSeats: seats,
         vehicleType: normalizedVehicleType,
         helmetProvided: helmetProvided !== undefined ? helmetProvided : req.user.helmetProvided ?? true,
-        contribution: parseFloat(contribution) || 0.0,
+        contribution: fareForDistance(routeDistanceKilometres(
+          { latitude: originLat, longitude: originLng },
+          { latitude: destLat, longitude: destLng },
+          waypoints,
+        )),
         notes: notes || '',
       },
       include: {
@@ -173,6 +194,7 @@ const searchRides = async (req, res, next) => {
       status: 'SCHEDULED',
       departureTime: { gte: new Date() },
       availableSeats: { gte: parseInt(seats, 10) },
+      driverId: { not: req.user.id },
     };
 
     if (from) {
@@ -240,13 +262,14 @@ const searchRides = async (req, res, next) => {
       prisma.ride.count({ where }),
     ]);
 
+    const rankedRides = rankRides(req.user?.id, rides);
     res.json({
       success: true,
-      count: rides.length,
+      count: rankedRides.length,
       total,
       page: parseInt(page, 10),
       pages: Math.ceil(total / take),
-      data: rides,
+      data: rankedRides,
     });
   } catch (error) {
     next(error);

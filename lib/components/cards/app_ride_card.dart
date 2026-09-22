@@ -56,11 +56,17 @@ class AppRideCard extends StatelessWidget {
               CircleAvatar(
                 radius: 20,
                 backgroundColor: AppColors.primaryTint,
-                backgroundImage: driverAvatarUrl != null ? NetworkImage(driverAvatarUrl!) : null,
+                backgroundImage: driverAvatarUrl != null
+                    ? NetworkImage(driverAvatarUrl!)
+                    : null,
                 child: driverAvatarUrl == null
                     ? Text(
-                        driverName.isNotEmpty ? driverName[0].toUpperCase() : 'U',
-                        style: AppTypography.labelLg.copyWith(color: AppColors.primary),
+                        driverName.isNotEmpty
+                            ? driverName[0].toUpperCase()
+                            : 'U',
+                        style: AppTypography.labelLg.copyWith(
+                          color: AppColors.primary,
+                        ),
                       )
                     : null,
               ),
@@ -74,21 +80,33 @@ class AppRideCard extends StatelessWidget {
                         Flexible(
                           child: Text(
                             driverName,
-                            style: AppTypography.headlineSm.copyWith(fontSize: 16),
+                            style: AppTypography.headlineSm.copyWith(
+                              fontSize: 16,
+                            ),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         const SizedBox(width: 4),
-                        const Icon(Icons.verified, size: 16, color: AppColors.primary),
+                        const Icon(
+                          Icons.verified,
+                          size: 16,
+                          color: AppColors.primary,
+                        ),
                       ],
                     ),
                     Row(
                       children: [
-                        const Icon(Icons.star_rounded, size: 14, color: AppColors.tertiaryLight),
+                        const Icon(
+                          Icons.star_rounded,
+                          size: 14,
+                          color: AppColors.tertiaryLight,
+                        ),
                         const SizedBox(width: 2),
                         Text(
                           driverRating.toStringAsFixed(1),
-                          style: AppTypography.caption.copyWith(fontWeight: FontWeight.w600),
+                          style: AppTypography.caption.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         const SizedBox(width: AppSpacing.xs),
                         Text('•', style: AppTypography.caption),
@@ -104,14 +122,19 @@ class AppRideCard extends StatelessWidget {
               ),
               if (matchPercentage != null) ...[
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.secondaryTint,
                     borderRadius: AppSpacing.radiusFull,
-                    border: Border.all(color: AppColors.secondaryLight.withValues(alpha: 0.3)),
+                    border: Border.all(
+                      color: AppColors.secondaryLight.withValues(alpha: 0.3),
+                    ),
                   ),
                   child: Text(
-                    '$matchPercentage% Match',
+                    '$matchPercentage% likely to accept',
                     style: AppTypography.caption.copyWith(
                       color: AppColors.secondary,
                       fontWeight: FontWeight.w700,
@@ -146,11 +169,7 @@ class AppRideCard extends StatelessWidget {
                         shape: BoxShape.circle,
                       ),
                     ),
-                    Container(
-                      width: 2,
-                      height: 24,
-                      color: AppColors.border,
-                    ),
+                    Container(width: 2, height: 24, color: AppColors.border),
                     Container(
                       width: 10,
                       height: 10,
@@ -168,14 +187,18 @@ class AppRideCard extends StatelessWidget {
                     children: [
                       Text(
                         origin,
-                        style: AppTypography.bodyMd.copyWith(fontWeight: FontWeight.w500),
+                        style: AppTypography.bodyMd.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 10),
                       Text(
                         destination,
-                        style: AppTypography.bodyMd.copyWith(fontWeight: FontWeight.w600),
+                        style: AppTypography.bodyMd.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -186,10 +209,7 @@ class AppRideCard extends StatelessWidget {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(
-                      'Departure',
-                      style: AppTypography.caption,
-                    ),
+                    Text('Departure', style: AppTypography.caption),
                     const SizedBox(height: 2),
                     Text(
                       departureTime,
@@ -213,14 +233,21 @@ class AppRideCard extends StatelessWidget {
               Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.surfaceContainer,
                       borderRadius: AppSpacing.radiusSm,
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.event_seat_rounded, size: 14, color: AppColors.onSurfaceVariant),
+                        const Icon(
+                          Icons.event_seat_rounded,
+                          size: 14,
+                          color: AppColors.onSurfaceVariant,
+                        ),
                         const SizedBox(width: 4),
                         Text(
                           '$availableSeats ${availableSeats == 1 ? 'seat' : 'seats'} left',
@@ -236,7 +263,9 @@ class AppRideCard extends StatelessWidget {
                   Text(
                     price > 0 ? '₹${price.toStringAsFixed(0)}' : 'Free',
                     style: AppTypography.headlineSm.copyWith(
-                      color: price > 0 ? AppColors.onSurface : AppColors.secondary,
+                      color: price > 0
+                          ? AppColors.onSurface
+                          : AppColors.secondary,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -250,7 +279,9 @@ class AppRideCard extends StatelessWidget {
                     foregroundColor: AppColors.onPrimary,
                     minimumSize: const Size(100, 38),
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    shape: RoundedRectangleBorder(borderRadius: AppSpacing.radiusMd),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: AppSpacing.radiusMd,
+                    ),
                   ),
                   child: Text(
                     bookButtonText,

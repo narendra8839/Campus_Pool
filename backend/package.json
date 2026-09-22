@@ -11,8 +11,10 @@
     "prisma:studio": "prisma studio",
     "seed:routes": "node scripts/seed-routes.js",
     "cleanup:four-wheelers": "node scripts/remove-four-wheelers.js",
+    "recalculate:fares": "node scripts/recalculate-fares.js",
     "generate:synthetic": "node scripts/generate-synthetic-data.js",
     "import:synthetic": "node scripts/import-synthetic-data.js",
+    "train:ncf": "python ml/train_ncf.py",
     "db:test": "node test_db.js"
   },
   "keywords": [

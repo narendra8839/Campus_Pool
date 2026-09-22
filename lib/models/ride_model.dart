@@ -23,6 +23,7 @@ class RideModel {
   final String vehicleType;
   final bool helmetProvided;
   final double contribution;
+  final double? matchAcceptanceProbability;
   final String notes;
   final String status;
   final List<BookingModel> bookings;
@@ -50,6 +51,7 @@ class RideModel {
     this.vehicleType = 'bike',
     this.helmetProvided = true,
     this.contribution = 0.0,
+    this.matchAcceptanceProbability,
     this.notes = '',
     this.status = 'SCHEDULED',
     this.bookings = const [],
@@ -128,6 +130,10 @@ class RideModel {
           ? json['helmetProvided']
           : true,
       contribution: fareVal,
+      matchAcceptanceProbability: _parseDouble(
+        json,
+        'matchAcceptanceProbability',
+      ),
       notes: _parseString(json, 'notes'),
       status: _parseString(json, 'status', defaultValue: 'SCHEDULED'),
       bookings: parsedBookings,
@@ -176,6 +182,7 @@ class RideModel {
       'vehicleType': vehicleType,
       'helmetProvided': helmetProvided,
       'contribution': contribution,
+      'matchAcceptanceProbability': matchAcceptanceProbability,
       'notes': notes,
       'status': status,
       'bookings': bookings.map((b) => b.toJson()).toList(),
