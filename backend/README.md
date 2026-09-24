@@ -98,6 +98,12 @@ JWT_EXPIRES_IN=30d
 ALLOWED_EMAIL_DOMAIN=
 ```
 
+If Neon closes an idle pooled connection, restart the backend; startup retries
+the database connection up to three times before failing clearly. For local
+development, use Neon's pooled connection URL and keep the connection limit
+small, for example by adding `&connection_limit=5&pool_timeout=20` to the
+`DATABASE_URL` query string.
+
 ### 4. Push Database Schema to Neon
 Sync your PostgreSQL database tables with the schema:
 ```bash
@@ -130,6 +136,11 @@ After `prisma db push`, run:
 ```bash
 npm run seed:routes
 ```
+
+The route seed also imports the generated road LineString geometry from
+`Corridor_1.txt` and `Corridor_2.txt` into each corridor's `routeData`.
+Flutter renders that geometry as MapLibre polylines; it does not connect hubs
+with straight lines.
 
 The seed is deterministic and safe to rerun. It creates corridors, ordered
 corridor hubs, VIT users, morning/evening rides, a booking, review, and an

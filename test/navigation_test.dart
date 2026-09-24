@@ -45,7 +45,7 @@ void main() {
       expect(find.text('Home'), findsWidgets);
       expect(find.text('Rides'), findsOneWidget);
       expect(find.text('Offer'), findsOneWidget);
-      expect(find.text('Alerts'), findsOneWidget);
+      expect(find.text('Map'), findsOneWidget);
       expect(find.text('Profile'), findsOneWidget);
     });
 

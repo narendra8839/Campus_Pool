@@ -1,4 +1,8 @@
+// ignore_for_file: unused_element
+
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:maplibre_gl/maplibre_gl.dart';
 import '../../components/components.dart';
 import '../../models/booking_model.dart';
 import '../../models/ride_model.dart';
@@ -9,8 +13,8 @@ import '../../theme/app_colors.dart';
 import '../../theme/app_spacing.dart';
 import '../../theme/app_typography.dart';
 import '../auth/login_screen.dart';
-import '../auto_groups/auto_groups_screen.dart';
 import '../find_rides_screen.dart';
+import '../alerts/alerts_screen.dart';
 import '../offer_ride_screen.dart';
 import '../navigation/main_navigation_shell.dart';
 import '../profile/profile_screen.dart';
@@ -18,6 +22,8 @@ import '../ride_details_screen.dart';
 import '../rides/driver_request_queue_screen.dart';
 import '../rides/my_rides_screen.dart';
 import '../map/map_screen.dart';
+import '../map/map_config.dart';
+import '../../utils/runtime_environment.dart';
 
 /// Campus Pool Home Dashboard Screen
 /// Based on Stitch design: projects/4131098890607133930/screens/f3c45ada102f44db80a425cc7c5598b1
@@ -42,6 +48,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   bool _isLoadingDashboard = true;
   String? _dashboardError;
   String _displayName = 'there';
+  MapLibreMapController? _mapController;
 
   @override
   void initState() {
@@ -97,122 +104,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // ── Mobile Top Bar ──────────────────────────────────────────
-            _buildTopBar(),
-
-            // ── Scrollable Content ──────────────────────────────────────
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.only(bottom: AppSpacing.xl),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: AppSpacing.md),
-
-                    // ── Location Card ─────────────────────────────────────
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.marginMobile,
-                      ),
-                      child: _buildLocationCard(),
-                    ),
-
-                    const SizedBox(height: AppSpacing.lg),
-
-                    // ── Bento Action Cards ────────────────────────────────
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.marginMobile,
-                      ),
-                      child: _buildActionCards(),
-                    ),
-
-                    const SizedBox(height: AppSpacing.md),
-
-                    // ── Auto Groups Card ──────────────────────────────────
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.marginMobile,
-                      ),
-                      child: AppCard(
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const AutoGroupsScreen(),
-                          ),
-                        ),
-                        padding: const EdgeInsets.all(AppSpacing.md),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 44,
-                              height: 44,
-                              decoration: const BoxDecoration(
-                                color: AppColors.secondaryTint,
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.groups_rounded,
-                                color: AppColors.secondary,
-                                size: 24,
-                              ),
-                            ),
-                            const SizedBox(width: AppSpacing.md),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Shared Auto Pooling',
-                                    style: AppTypography.labelMd.copyWith(
-                                      fontWeight: FontWeight.bold,
-                                      color: AppColors.onSurface,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    'Match with 3-4 students heading your route',
-                                    style: AppTypography.caption.copyWith(
-                                      color: AppColors.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const Icon(
-                              Icons.chevron_right_rounded,
-                              color: AppColors.outlineVariant,
-                              size: 22,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: AppSpacing.lg),
-
-                    // ── Active Ride Section ───────────────────────────────
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.marginMobile,
-                      ),
-                      child: _buildActiveRideSection(),
-                    ),
-
-                    const SizedBox(height: AppSpacing.lg),
-
-                    // ── Nearby Rides Section ──────────────────────────────
-                    _buildNearbyRidesSection(),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+      body: _buildMapFirstHome(),
 
       // ── Bottom Navigation Bar ───────────────────────────────────────────
       bottomNavigationBar: widget.embeddedInShell
@@ -233,9 +125,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 } else if (index == 3) {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => const DriverRequestQueueScreen(),
-                    ),
+                    MaterialPageRoute(builder: (_) => const MapScreen()),
                   );
                 } else if (index == 4) {
                   Navigator.push(
@@ -263,10 +153,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   label: 'Offer',
                 ),
                 AppNavItem(
-                  icon: Icons.notifications_none_rounded,
-                  selectedIcon: Icons.notifications_rounded,
-                  label: 'Alerts',
-                  badgeCount: 2,
+                  icon: Icons.map_outlined,
+                  selectedIcon: Icons.map_rounded,
+                  label: 'Map',
                 ),
                 AppNavItem(
                   icon: Icons.person_outline_rounded,
@@ -275,6 +164,183 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 ),
               ],
             ),
+    );
+  }
+
+  Widget _buildMapFirstHome() {
+    final supportsMap = !isFlutterTest &&
+        (kIsWeb ||
+            defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS);
+    return Stack(
+      children: [
+        if (supportsMap)
+          MapLibreMap(
+            styleString: MapConfig.styleUrl,
+            initialCameraPosition: MapConfig.initialCameraPosition,
+            onMapCreated: (controller) => _mapController = controller,
+          )
+        else
+          const ColoredBox(
+            color: AppColors.background,
+            child: Center(
+              child: Text('Map preview is available on mobile and web.'),
+            ),
+          ),
+        Positioned(
+          top: MediaQuery.of(context).padding.top + AppSpacing.sm,
+          left: AppSpacing.marginMobile,
+          right: AppSpacing.marginMobile,
+          child: _buildMapSearchPanel(),
+        ),
+        Positioned(
+          top: MediaQuery.of(context).padding.top + 76,
+          right: AppSpacing.marginMobile,
+          child: ElevatedButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const MapScreen()),
+            ),
+            icon: const Icon(Icons.map_outlined, size: 18),
+            label: const Text('Campus Map'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.surface,
+              foregroundColor: AppColors.primary,
+              elevation: 4,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: AppSpacing.radiusFull,
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          right: AppSpacing.marginMobile,
+          bottom: 300,
+          child: FloatingActionButton.small(
+            heroTag: 'home-location',
+            backgroundColor: AppColors.surface,
+            foregroundColor: AppColors.primary,
+            onPressed: () => _mapController?.animateCamera(
+              CameraUpdate.newCameraPosition(MapConfig.initialCameraPosition),
+            ),
+            child: const Icon(Icons.my_location_rounded),
+          ),
+        ),
+        DraggableScrollableSheet(
+          initialChildSize: 0.30,
+          minChildSize: 0.18,
+          maxChildSize: 0.78,
+          snap: true,
+          snapSizes: const [0.30, 0.78],
+          builder: (context, scrollController) => Container(
+            decoration: const BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              boxShadow: [
+                BoxShadow(
+                  color: Color(0x22000000),
+                  blurRadius: 16,
+                  offset: Offset(0, -4),
+                ),
+              ],
+            ),
+            child: ListView(
+              controller: scrollController,
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.marginMobile,
+                AppSpacing.sm,
+                AppSpacing.marginMobile,
+                AppSpacing.xl,
+              ),
+              children: [
+                Center(
+                  child: Container(
+                    width: 42,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.border,
+                      borderRadius: AppSpacing.radiusFull,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  'Available pools near you',
+                  style: AppTypography.headlineSm.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                if (_isLoadingDashboard)
+                  const Padding(
+                    padding: EdgeInsets.all(AppSpacing.lg),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (_nearbyRides.isEmpty)
+                  Text(
+                    'No rides found near VIT College yet.',
+                    style: AppTypography.bodySm.copyWith(
+                      color: AppColors.onSurfaceVariant,
+                    ),
+                  )
+                else
+                  ..._nearbyRides.map(
+                    (ride) => Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                      child: _buildRideCard(ride),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMapSearchPanel() {
+    return Material(
+      elevation: 5,
+      shadowColor: Colors.black26,
+      borderRadius: AppSpacing.radiusLg,
+      color: AppColors.surface,
+      child: InkWell(
+        borderRadius: AppSpacing.radiusLg,
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const FindRidesScreen()),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Row(
+            children: [
+              const Icon(Icons.search_rounded, color: AppColors.primary),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  'Where do you want to go?',
+                  style: AppTypography.bodyMd.copyWith(
+                    color: AppColors.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: const BoxDecoration(
+                  color: AppColors.primaryTint,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.tune_rounded,
+                  size: 18,
+                  color: AppColors.primary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -314,12 +380,15 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               _NotificationButton(
                 onTap: () {
                   if (widget.embeddedInShell) {
-                    MainNavigationShell.switchTab(context, 3);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const AlertsScreen()),
+                    );
                   } else {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => const DriverRequestQueueScreen(),
+                        builder: (_) => const AlertsScreen(),
                       ),
                     );
                   }
@@ -893,6 +962,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           ? driver!.vehicleModel
           : null,
       driverRating: driver?.ratingAvg ?? 0.0,
+      matchPercentage: ride.matchAcceptanceProbability == null
+          ? null
+          : (ride.matchAcceptanceProbability! * 100).round(),
       status: status,
       bookButtonText: bookButtonText,
       onTap: () => Navigator.push(

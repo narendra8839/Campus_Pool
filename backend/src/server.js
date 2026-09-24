@@ -7,18 +7,39 @@ const app = require('./app');
 const prisma = require('./config/prisma');
 
 const PORT = process.env.PORT || 5000;
+const DATABASE_CONNECT_ATTEMPTS = 3;
+
+async function connectToDatabase() {
+  if (!process.env.DATABASE_URL) {
+    console.warn('[Neon PostgreSQL] Warning: DATABASE_URL is not defined in .env');
+    return;
+  }
+
+  let lastError;
+  for (let attempt = 1; attempt <= DATABASE_CONNECT_ATTEMPTS; attempt += 1) {
+    try {
+      await prisma.$connect();
+      console.log('[Neon PostgreSQL] Connected successfully to database!');
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < DATABASE_CONNECT_ATTEMPTS) {
+        const delayMs = attempt * 2000;
+        console.warn(
+          `[Neon PostgreSQL] Connection attempt ${attempt} failed; retrying in ${delayMs}ms.`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  throw lastError;
+}
 
 async function startServer() {
   try {
-    // Test database connection if DATABASE_URL is provided
-    if (process.env.DATABASE_URL) {
-      await prisma.$connect();
-      console.log('[Neon PostgreSQL] Connected successfully to database!');
-    } else {
-      console.warn('[Neon PostgreSQL] Warning: DATABASE_URL is not defined in .env');
-    }
-
-    const server = app.listen(PORT, () => {
+    await connectToDatabase();
+    const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`===================================================`);
       console.log(`🚗 Campus Pool Backend Server Running (Postgres/Neon)`);
       console.log(`📡 Port: http://localhost:${PORT}`);
@@ -42,6 +63,7 @@ async function startServer() {
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   } catch (error) {
     console.error(`[Server Error]: ${error.message}`);
+    process.exitCode = 1;
   }
 }
 

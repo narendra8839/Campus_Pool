@@ -17,12 +17,16 @@ function readCorridor(file, number) {
   const routeData = JSON.parse(
     fs.readFileSync(path.join(__dirname, '..', 'data', 'routes.json'), 'utf8'),
   );
+  const sourceRoute = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8'),
+  );
   const corridor = routeData.corridors.find((item) => item.sourceFile === file);
   if (!corridor) throw new Error(`No normalized corridor data found for ${file}`);
   return {
     ...corridor,
     name: corridor.name || `Corridor ${number}`,
     hubs: corridor.hubs.map((hub) => ({ ...hub })),
+    geometry: sourceRoute.routes?.[0]?.geometry ?? null,
   };
 }
 
@@ -47,7 +51,7 @@ async function main() {
   for (let i = 0; i < 8; i += 1) {
     users.push(await prisma.user.create({
       data: {
-        id: id('user', i), name: `VIT Seed User ${i + 1}`, email: `user${i + 1}@seed.campus.pool`,
+        id: id('route-seed-user', i), name: `VIT Seed User ${i + 1}`, email: `user${i + 1}@seed.campus.pool`,
         password, phone: `90000000${String(i).padStart(2, '0')}`, college: 'VIT Pune',
         rollNumber: `SEED${String(i + 1).padStart(3, '0')}`, vehicleType: i % 2 ? 'scooty' : 'bike', vehicleSeats: 1,
       },
@@ -73,18 +77,19 @@ async function main() {
   const rides = [];
   for (let i = 0; i < routeRecords.length; i += 1) {
     const { corridor, links } = routeRecords[i];
+    const routeHubs = corridor.routeData?.hubs || [];
     const origin = links[0];
     const end = links[links.length - 2] || links[links.length - 1];
     const date = i === 0 ? '2027-01-11' : '2027-01-12';
     const morning = await prisma.ride.create({ data: {
       id: id('ride', `${i}:morning`), driverId: users[i].id, corridorId: corridor.id, originHubId: origin.hubId, destinationHubId: vit.id,
       originName: corridor.originName, destName: corridor.destinationName, departureTime: new Date(`${date}T07:45:00+05:30`),
-      totalSeats: 1, availableSeats: 1, vehicleType: 'bike', waypoints: route.hubs || [],
+      totalSeats: 1, availableSeats: 1, vehicleType: 'bike', waypoints: routeHubs,
     } });
     const evening = await prisma.ride.create({ data: {
       id: id('ride', `${i}:evening`), driverId: users[i + 2].id, corridorId: corridor.id, originHubId: vit.id, destinationHubId: end.hubId,
-      originName: corridor.destinationName, destName: route.hubs[route.hubs.length - 2].name, departureTime: new Date(`${date}T17:30:00+05:30`),
-      totalSeats: 1, availableSeats: 1, vehicleType: 'scooty', waypoints: route.hubs || [],
+      originName: corridor.destinationName, destName: routeHubs[routeHubs.length - 2].name, departureTime: new Date(`${date}T17:30:00+05:30`),
+      totalSeats: 1, availableSeats: 1, vehicleType: 'scooty', waypoints: routeHubs,
     } });
     rides.push(morning, evening);
   }
@@ -96,8 +101,8 @@ async function main() {
   await prisma.review.create({ data: { id: id('review', 'seed'), rideId: rides[0].id, reviewerId: users[0].id, revieweeId: users[2].id, rating: 5, comment: 'Great commute.' } });
   const group = await prisma.autoGroup.create({ data: { id: id('auto-group', 'seed'), pickupName: corridors[0].originName, normalizedPickupName: normalise(corridors[0].originName), destinationName: 'VIT College', normalizedDestinationName: 'vit college', departureTime: new Date('2027-01-13T07:30:00+05:30') } });
   for (let i = 3; i < 6; i += 1) {
-    const request = await prisma.autoRequest.create({ data: { id: id('auto-request', i), userId: users[i].id, pickupName: corridors[0].originName, normalizedPickupName: normalise(corridors[0].originName), destinationName: 'VIT College', normalizedDestinationName: 'vit college', desiredDepartureTime: group.departureTime, status: 'MATCHED' } });
-    await prisma.autoGroupMember.create({ data: { id: id('auto-member', i), groupId: group.id, userId: users[i].id, requestId: request.id } });
+    const request = await prisma.autoRequest.create({ data: { id: id('route-seed-auto-request', i), userId: users[i].id, pickupName: corridors[0].originName, normalizedPickupName: normalise(corridors[0].originName), destinationName: 'VIT College', normalizedDestinationName: 'vit college', desiredDepartureTime: group.departureTime, status: 'MATCHED' } });
+    await prisma.autoGroupMember.create({ data: { id: id('route-seed-auto-member', i), groupId: group.id, userId: users[i].id, requestId: request.id } });
   }
   await prisma.autoGroup.update({ where: { id: group.id }, data: { status: 'READY' } });
   console.log(`Seeded ${corridors.length} corridors, ${rides.length} rides, 1 booking, 1 review and 3 auto requests.`);

@@ -3,8 +3,8 @@
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 class MapConfig {
-  // OpenFreeMap compatible style URL (demotiles provided by MapLibre)
-  static const String styleUrl = 'https://demotiles.maplibre.org/style.json';
+  // OpenFreeMap's public Liberty style does not require an API key.
+  static const String styleUrl = 'https://tiles.openfreemap.org/styles/liberty';
 
   // Initial camera position – campus coordinates provided by user
   static const CameraPosition initialCameraPosition = CameraPosition(

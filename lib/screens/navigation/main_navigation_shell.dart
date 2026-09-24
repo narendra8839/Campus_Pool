@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import '../../components/navigation/app_bottom_nav_bar.dart';
 import '../../routes/app_navigator.dart';
 import '../../routes/app_routes.dart';
-import '../alerts/alerts_screen.dart';
 import '../home/home_dashboard_screen.dart';
+import '../map/map_screen.dart';
 import '../offer_ride_screen.dart';
 import '../profile/profile_screen.dart';
 import '../rides/my_rides_screen.dart';
@@ -60,7 +60,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
       AppRoutes.home,
       AppRoutes.rides,
       AppRoutes.offer,
-      AppRoutes.alerts,
+      AppRoutes.map,
       AppRoutes.profile,
     ];
     AppNavigator.recordProtectedRoute(routes[_currentIndex]);
@@ -82,7 +82,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             HomeDashboardScreen(embeddedInShell: true),
             MyRidesScreen(),
             OfferRideScreen(embeddedInShell: true),
-            AlertsScreen(),
+            MapScreen(),
             ProfileScreen(),
           ],
         ),
@@ -106,9 +106,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
               label: 'Offer',
             ),
             AppNavItem(
-              icon: Icons.notifications_none_rounded,
-              selectedIcon: Icons.notifications_rounded,
-              label: 'Alerts',
+              icon: Icons.map_outlined,
+              selectedIcon: Icons.map_rounded,
+              label: 'Map',
             ),
             AppNavItem(
               icon: Icons.person_outline_rounded,

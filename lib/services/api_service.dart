@@ -16,6 +16,8 @@ class ApiException implements Exception {
 
 class ApiService {
   static const String _tokenKey = 'auth_jwt_token';
+  static const String _deployedBaseUrl =
+      'https://campus-pool-gamma.vercel.app/api';
   static String? _workingBaseUrl;
   static Future<void> Function()? onUnauthorized;
   static bool _unauthorizedHandled = false;
@@ -40,12 +42,13 @@ class ApiService {
 
   static List<String> _getFallbackBaseUrls() {
     if (kIsWeb) {
-      return ['http://localhost:5000/api'];
+      return [_deployedBaseUrl, 'http://localhost:5000/api'];
     }
 
     try {
       if (Platform.isAndroid) {
         return [
+          _deployedBaseUrl,
           'http://localhost:5000/api', // Physical device with adb reverse
           'http://10.0.2.2:5000/api', // Android Studio Emulator
           'http://10.82.163.170:5000/api', // Host machine Wi-Fi LAN IP
@@ -56,6 +59,7 @@ class ApiService {
     }
 
     return [
+      _deployedBaseUrl,
       'http://localhost:5000/api',
       'http://127.0.0.1:5000/api',
       'http://10.82.163.170:5000/api',

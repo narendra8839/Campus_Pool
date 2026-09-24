@@ -36,6 +36,7 @@ class CorridorModel {
   final String originName;
   final String destinationName;
   final List<HubModel> hubs;
+  final List<List<double>> geometryCoordinates;
 
   const CorridorModel({
     required this.id,
@@ -43,10 +44,40 @@ class CorridorModel {
     required this.originName,
     required this.destinationName,
     required this.hubs,
+    required this.geometryCoordinates,
   });
 
   factory CorridorModel.fromJson(Map<String, dynamic> json) {
     final rawHubs = json['hubs'] is List ? json['hubs'] as List : const [];
+    final routeData = json['routeData'] is Map<String, dynamic>
+        ? json['routeData'] as Map<String, dynamic>
+        : const <String, dynamic>{};
+    final geometry = routeData['geometry'] is Map<String, dynamic>
+        ? routeData['geometry'] as Map<String, dynamic>
+        : routeData['routes'] is List &&
+              (routeData['routes'] as List).isNotEmpty &&
+              (routeData['routes'].first is Map<String, dynamic>)
+        ? ((routeData['routes'].first as Map<String, dynamic>)['geometry']
+                  is Map<String, dynamic>
+              ? (routeData['routes'].first as Map<String, dynamic>)['geometry']
+                    as Map<String, dynamic>
+              : const <String, dynamic>{})
+        : const <String, dynamic>{};
+    final rawCoordinates = geometry['coordinates'] is List
+        ? geometry['coordinates'] as List
+        : const [];
+    final coordinates = rawCoordinates
+        .whereType<List>()
+        .where(
+          (point) => point.length >= 2 && point[0] is num && point[1] is num,
+        )
+        .map(
+          (point) => [
+            (point[0] as num).toDouble(),
+            (point[1] as num).toDouble(),
+          ],
+        )
+        .toList();
     return CorridorModel(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
@@ -58,6 +89,7 @@ class CorridorModel {
               .map((hub) => HubModel.fromJson(hub))
               .toList()
             ..sort((a, b) => a.sequence.compareTo(b.sequence)),
+      geometryCoordinates: coordinates,
     );
   }
 
