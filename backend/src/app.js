@@ -10,6 +10,7 @@ const bookingRoutes = require('./routes/bookingRoutes');
 const reviewRoutes = require('./routes/reviewRoutes');
 const autoGroupRoutes = require('./routes/autoGroupRoutes');
 const routeRoutes = require('./routes/routeRoutes');
+const geocodingRoutes = require('./routes/geocodingRoutes');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 
 const app = express();
@@ -53,6 +54,7 @@ app.get('/api', (req, res) => {
       reviews: '/api/reviews',
       autoGroups: '/api/auto-groups',
       routes: '/api/routes/corridors',
+      geocoding: '/api/geocoding',
     },
   });
 });
@@ -65,6 +67,7 @@ app.use('/api/bookings', bookingRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/auto-groups', autoGroupRoutes);
 app.use('/api/routes', routeRoutes);
+app.use('/api/geocoding', geocodingRoutes);
 
 // 404 & Error Handlers
 app.use(notFound);

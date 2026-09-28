@@ -72,6 +72,7 @@ We provide environment-specific template files for different deployment stages:
 - **Never commit `.env` files** to version control. They are already ignored by `.gitignore`.
 - Use environment-specific secrets and configurations.
 - Consider using a secrets manager or environment variables provided by your hosting platform for staging and production.
+- Set `NOMINATIM_USER_AGENT` to identify CampusPool and provide a monitored contact address when using public Nominatim.
 
 ---
 
@@ -96,6 +97,7 @@ DATABASE_URL="postgresql://neondb_owner:YOUR_PASSWORD@ep-xyz.us-east-2.aws.neon.
 JWT_SECRET=campus_pool_jwt_super_secret_key_2026
 JWT_EXPIRES_IN=30d
 ALLOWED_EMAIL_DOMAIN=
+NOMINATIM_USER_AGENT="CampusPool/1.0 (contact: your-email@example.com)"
 ```
 
 If Neon closes an idle pooled connection, restart the backend; startup retries
@@ -149,6 +151,32 @@ auto-group. Seed accounts use `user1@seed.campus.pool` through
 read `GET /api/routes/corridors`; route-linked rides accept `corridorId`,
 `originHubId`, and `destinationHubId` while retaining the existing location
 fields.
+
+### Place search and reverse geocoding
+
+CampusPool proxies geocoding requests through its backend:
+
+```text
+GET /api/geocoding/search?q=Kothrud&limit=5
+GET /api/geocoding/reverse?lat=18.5&lon=73.8
+```
+
+The backend calls the public Nominatim service, returns a stable CampusPool
+place shape, caches results in memory for five minutes, and schedules outbound
+requests at no more than one per second. Search queries must contain 3–200
+characters; result limits are capped at 10. Search is submitted explicitly,
+not sent as-you-type, in line with the public Nominatim usage policy. Requests
+time out explicitly, and the backend bounds its outbound queue.
+
+Configure `NOMINATIM_USER_AGENT` in each deployment with the application name
+and a monitored contact address. The Flutter map submits place searches
+explicitly and reverse-geocodes map taps. The UI displays OpenStreetMap
+contributor attribution. Caching and request scheduling are process-local; a
+multi-instance deployment needs a shared cache and rate limiter to enforce the
+policy across instances. Public Nominatim is subject to its
+[usage policy](https://operations.osmfoundation.org/policies/nominatim/); for
+sustained production traffic, use a compliant hosted service or operate your
+own instance.
 
 Only bikes and scooties can be offered. If an older database contains
 four-wheeler records, remove those rides and reset the associated vehicle

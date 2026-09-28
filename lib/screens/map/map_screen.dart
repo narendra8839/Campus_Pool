@@ -1,7 +1,10 @@
+import 'dart:math' show Point;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 import '../../models/corridor_model.dart';
+import '../../models/geocoding_result.dart';
+import '../../services/geocoding_service.dart';
 import '../../services/route_service.dart';
 import 'map_config.dart';
 import '../../utils/runtime_environment.dart';
@@ -22,6 +25,16 @@ class _MapScreenState extends State<MapScreen> {
   MapLibreMapController? _mapController;
   bool _hubsLoading = false;
   int _mapInstance = 0;
+  final TextEditingController _searchController = TextEditingController();
+  List<GeocodingResult> _searchResults = const [];
+  GeocodingResult? _selectedPlace;
+  Circle? _searchCircle;
+  String? _searchError;
+  bool _searchLoading = false;
+  bool _reverseLoading = false;
+  int _searchRequestId = 0;
+  int _reverseRequestId = 0;
+  int _mapSelectionRequestId = 0;
 
   @override
   void initState() {
@@ -53,9 +66,167 @@ class _MapScreenState extends State<MapScreen> {
       _corridorCount = 0;
       _mapController = null;
       _hubsLoading = false;
+      _searchCircle = null;
+      _mapSelectionRequestId++;
       _mapInstance++;
     });
     _startLoadTimeout();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _onSearchChanged(String _) {
+    ++_searchRequestId;
+    ++_reverseRequestId;
+    ++_mapSelectionRequestId;
+    setState(() {
+      _searchError = null;
+      _searchResults = const [];
+      _searchLoading = false;
+      _reverseLoading = false;
+      _selectedPlace = null;
+    });
+    if (_searchCircle != null) {
+      _removeSearchCircleSafely();
+    }
+  }
+
+  Future<void> _searchPlaces() async {
+    final query = _searchController.text.trim();
+    if (query.length < 3) {
+      setState(() => _searchError = 'Enter at least 3 characters to search.');
+      return;
+    }
+    final requestId = ++_searchRequestId;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _searchError = null;
+      _searchResults = const [];
+      _searchLoading = true;
+    });
+
+    try {
+      final results = await GeocodingService.search(query);
+      if (!mounted || requestId != _searchRequestId) return;
+      setState(() {
+        _searchResults = results;
+        _searchLoading = false;
+        if (results.isEmpty) _searchError = 'No places found.';
+      });
+    } catch (error) {
+      if (!mounted || requestId != _searchRequestId) return;
+      setState(() {
+        _searchError = 'Place search failed: $error';
+        _searchLoading = false;
+      });
+    }
+  }
+
+  Future<void> _selectPlace(GeocodingResult place) async {
+    _reverseRequestId++;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _selectedPlace = place;
+      _searchController.text = place.displayName;
+      _searchResults = const [];
+      _searchError = null;
+      _searchLoading = false;
+      _reverseLoading = false;
+    });
+    await _showPlaceOnMap(place);
+  }
+
+  Future<void> _onMapTap(Point<double> _, LatLng coordinates) async {
+    final requestId = ++_reverseRequestId;
+    ++_searchRequestId;
+    ++_mapSelectionRequestId;
+    setState(() {
+      _searchController.clear();
+      _searchResults = const [];
+      _searchError = null;
+      _searchLoading = false;
+      _selectedPlace = null;
+      _reverseLoading = true;
+    });
+    try {
+      await _removeSearchCircle();
+      final place = await GeocodingService.reverse(
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+      );
+      if (!mounted || requestId != _reverseRequestId) return;
+      setState(() {
+        _selectedPlace = place;
+        _searchController.text = place.displayName;
+        _reverseLoading = false;
+      });
+      await _showPlaceOnMap(place);
+    } catch (error) {
+      if (!mounted || requestId != _reverseRequestId) return;
+      setState(() {
+        _searchError = 'Address lookup failed: $error';
+        _reverseLoading = false;
+      });
+    }
+  }
+
+  Future<void> _showPlaceOnMap(GeocodingResult place) async {
+    final controller = _mapController;
+    if (controller == null || !_styleLoaded) return;
+    final requestId = ++_mapSelectionRequestId;
+
+    try {
+      await _removeSearchCircle();
+      if (!mounted ||
+          requestId != _mapSelectionRequestId ||
+          controller != _mapController) {
+        return;
+      }
+      await controller.animateCamera(
+        CameraUpdate.newLatLngZoom(LatLng(place.latitude, place.longitude), 16),
+      );
+      if (!mounted ||
+          requestId != _mapSelectionRequestId ||
+          controller != _mapController) {
+        return;
+      }
+      _searchCircle = await controller.addCircle(
+        CircleOptions(
+          geometry: LatLng(place.latitude, place.longitude),
+          circleColor: '#D32F2F',
+          circleRadius: 10,
+          circleStrokeColor: '#FFFFFF',
+          circleStrokeWidth: 3,
+          circleOpacity: 1,
+        ),
+      );
+    } catch (error) {
+      if (mounted && requestId == _mapSelectionRequestId) {
+        setState(() => _searchError = 'Could not show place on map: $error');
+      }
+    }
+  }
+
+  Future<void> _removeSearchCircle() async {
+    final circle = _searchCircle;
+    final controller = _mapController;
+    if (circle == null || controller == null) return;
+    _searchCircle = null;
+    await controller.removeCircle(circle);
+  }
+
+  Future<void> _removeSearchCircleSafely() async {
+    try {
+      await _removeSearchCircle();
+    } catch (error) {
+      if (mounted) {
+        setState(() => _searchError = 'Could not clear map selection: $error');
+      }
+    }
   }
 
   Future<void> _loadHubs() async {
@@ -130,7 +301,8 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final supportsMap = !isFlutterTest &&
+    final supportsMap =
+        !isFlutterTest &&
         (kIsWeb ||
             defaultTargetPlatform == TargetPlatform.android ||
             defaultTargetPlatform == TargetPlatform.iOS);
@@ -140,23 +312,158 @@ class _MapScreenState extends State<MapScreen> {
         children: [
           if (supportsMap)
             MapLibreMap(
-            key: ValueKey(_mapInstance),
-            styleString: MapConfig.styleUrl,
-            initialCameraPosition: MapConfig.initialCameraPosition,
-            onMapCreated: (controller) {
-              _mapController = controller;
-              if (_styleLoaded) _loadHubs();
-            },
-            onStyleLoadedCallback: () {
-              _updateAfterFrame(() => _styleLoaded = true);
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) _loadHubs();
-              });
-            },
+              key: ValueKey(_mapInstance),
+              styleString: MapConfig.styleUrl,
+              initialCameraPosition: MapConfig.initialCameraPosition,
+              onMapCreated: (controller) {
+                _mapController = controller;
+                if (_styleLoaded) {
+                  _loadHubs();
+                  final place = _selectedPlace;
+                  if (place != null) _showPlaceOnMap(place);
+                }
+              },
+              onMapClick: _onMapTap,
+              onStyleLoadedCallback: () {
+                _updateAfterFrame(() => _styleLoaded = true);
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (!mounted) return;
+                  _loadHubs();
+                  final place = _selectedPlace;
+                  if (place != null) _showPlaceOnMap(place);
+                });
+              },
             )
           else
             const Center(
               child: Text('Map preview is available on mobile and web.'),
+            ),
+          if (supportsMap)
+            Positioned(
+              top: 12,
+              left: 12,
+              right: 12,
+              child: SafeArea(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Material(
+                      elevation: 4,
+                      borderRadius: BorderRadius.circular(12),
+                      child: TextField(
+                        controller: _searchController,
+                        onChanged: _onSearchChanged,
+                        onSubmitted: (_) => _searchPlaces(),
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                          hintText: 'Search places or addresses',
+                          prefixIcon: const Icon(Icons.search),
+                          suffixIcon: _searchLoading
+                              ? const Padding(
+                                  padding: EdgeInsets.all(14),
+                                  child: SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                )
+                              : Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (_searchController.text.isNotEmpty)
+                                      IconButton(
+                                        tooltip: 'Clear search',
+                                        icon: const Icon(Icons.clear),
+                                        onPressed: () {
+                                          ++_searchRequestId;
+                                          ++_reverseRequestId;
+                                          ++_mapSelectionRequestId;
+                                          _searchController.clear();
+                                          setState(() {
+                                            _searchResults = const [];
+                                            _searchError = null;
+                                            _selectedPlace = null;
+                                            _reverseLoading = false;
+                                          });
+                                          _removeSearchCircleSafely();
+                                        },
+                                      ),
+                                    IconButton(
+                                      tooltip: 'Search places',
+                                      icon: const Icon(Icons.search),
+                                      onPressed: _searchPlaces,
+                                    ),
+                                  ],
+                                ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                          filled: true,
+                          fillColor: Colors.white,
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (_searchError != null ||
+                        _searchResults.isNotEmpty ||
+                        _reverseLoading)
+                      Card(
+                        margin: const EdgeInsets.only(top: 8),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 280),
+                          child: _reverseLoading
+                              ? const Padding(
+                                  padding: EdgeInsets.all(16),
+                                  child: Row(
+                                    children: [
+                                      SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      ),
+                                      SizedBox(width: 12),
+                                      Text('Finding address…'),
+                                    ],
+                                  ),
+                                )
+                              : _searchError != null
+                              ? Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Text(_searchError!),
+                                )
+                              : ListView.separated(
+                                  shrinkWrap: true,
+                                  itemCount: _searchResults.length,
+                                  separatorBuilder: (_, _) =>
+                                      const Divider(height: 1),
+                                  itemBuilder: (context, index) {
+                                    final place = _searchResults[index];
+                                    return ListTile(
+                                      leading: const Icon(Icons.place_outlined),
+                                      title: Text(
+                                        place.displayName,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      subtitle: place.type.isEmpty
+                                          ? null
+                                          : Text(place.type),
+                                      onTap: () => _selectPlace(place),
+                                    );
+                                  },
+                                ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
           if (_hubsError != null && _styleLoaded)
             Positioned(
@@ -170,10 +477,38 @@ class _MapScreenState extends State<MapScreen> {
                 ),
               ),
             ),
-          if (_hubsError == null && _styleLoaded && _hubCount > 0)
+          if (_selectedPlace != null && _styleLoaded)
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 12,
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _selectedPlace!.displayName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '© OpenStreetMap contributors',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            )
+          else if (_hubsError == null && _styleLoaded && _hubCount > 0)
             Positioned(
               left: 16,
-              bottom: 16,
+              bottom: 12,
               child: Card(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
@@ -182,6 +517,20 @@ class _MapScreenState extends State<MapScreen> {
                   ),
                   child: Text(
                     '$_hubCount hubs and $_corridorCount corridors loaded',
+                  ),
+                ),
+              ),
+            ),
+          if (_selectedPlace == null && _styleLoaded)
+            const Positioned(
+              right: 8,
+              bottom: 12,
+              child: Card(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  child: Text(
+                    '© OpenStreetMap contributors',
+                    style: TextStyle(fontSize: 10),
                   ),
                 ),
               ),
