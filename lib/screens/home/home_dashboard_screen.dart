@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 import '../../components/components.dart';
@@ -59,6 +60,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   int _homeRouteRequestId = 0;
   bool _homeMapStyleLoaded = false;
   String? _homeRouteError;
+  bool _homeMapVisible = true;
 
   @override
   void initState() {
@@ -191,6 +193,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     }
   }
 
+  Future<void> _openHomeRoute(Widget screen) async {
+    setState(() => _homeMapVisible = false);
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    await Navigator.of(context, rootNavigator: true).push<void>(
+      MaterialPageRoute<void>(builder: (_) => screen),
+    );
+    if (mounted) setState(() => _homeMapVisible = true);
+  }
+
   Future<void> _loadDashboardData() async {
     try {
       final user = await AuthService.loadSession();
@@ -305,11 +317,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             defaultTargetPlatform == TargetPlatform.iOS);
     return Stack(
       children: [
-        if (supportsMap)
+        if (supportsMap && _homeMapVisible)
           Positioned.fill(
             child: MapLibreMap(
               styleString: MapConfig.styleUrl,
               initialCameraPosition: MapConfig.initialCameraPosition,
+              gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+                Factory<EagerGestureRecognizer>(
+                  () => EagerGestureRecognizer(),
+                ),
+              },
               onMapCreated: (controller) {
                 _mapController = controller;
                 if (_homeMapStyleLoaded) _onRoutePreviewChanged();
@@ -406,20 +423,22 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         Positioned(
           top: MediaQuery.of(context).padding.top + 76,
           right: AppSpacing.marginMobile,
-          child: ElevatedButton.icon(
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const MapScreen()),
-            ),
-            icon: const Icon(Icons.map_outlined, size: 18),
-            label: const Text('Campus Map'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.surface,
-              foregroundColor: AppColors.primary,
-              elevation: 4,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              shape: RoundedRectangleBorder(
-                borderRadius: AppSpacing.radiusFull,
+          child: PointerInterceptor(
+            child: ElevatedButton.icon(
+              onPressed: () => _openHomeRoute(const MapScreen()),
+              icon: const Icon(Icons.map_outlined, size: 18),
+              label: const Text('Campus Map'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.surface,
+                foregroundColor: AppColors.primary,
+                elevation: 4,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: AppSpacing.radiusFull,
+                ),
               ),
             ),
           ),
@@ -446,15 +465,45 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           ),
         Positioned(
           right: AppSpacing.marginMobile,
-          bottom: 300,
-          child: FloatingActionButton.small(
-            heroTag: 'home-location',
-            backgroundColor: AppColors.surface,
-            foregroundColor: AppColors.primary,
-            onPressed: () => _mapController?.animateCamera(
-              CameraUpdate.newCameraPosition(MapConfig.initialCameraPosition),
+          bottom: MediaQuery.of(context).size.height * 0.34,
+          child: PointerInterceptor(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FloatingActionButton.small(
+                  heroTag: 'home-zoom-in',
+                  tooltip: 'Zoom in',
+                  backgroundColor: AppColors.surface,
+                  foregroundColor: AppColors.primary,
+                  onPressed: () =>
+                      _mapController?.animateCamera(CameraUpdate.zoomIn()),
+                  child: const Icon(Icons.add),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton.small(
+                  heroTag: 'home-zoom-out',
+                  tooltip: 'Zoom out',
+                  backgroundColor: AppColors.surface,
+                  foregroundColor: AppColors.primary,
+                  onPressed: () =>
+                      _mapController?.animateCamera(CameraUpdate.zoomOut()),
+                  child: const Icon(Icons.remove),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton.small(
+                  heroTag: 'home-location',
+                  tooltip: 'Reset map view',
+                  backgroundColor: AppColors.surface,
+                  foregroundColor: AppColors.primary,
+                  onPressed: () => _mapController?.animateCamera(
+                    CameraUpdate.newCameraPosition(
+                      MapConfig.initialCameraPosition,
+                    ),
+                  ),
+                  child: const Icon(Icons.my_location_rounded),
+                ),
+              ],
             ),
-            child: const Icon(Icons.my_location_rounded),
           ),
         ),
       ],
@@ -469,10 +518,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       color: AppColors.surface,
       child: InkWell(
         borderRadius: AppSpacing.radiusLg,
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const FindRidesScreen()),
-        ),
+        onTap: () => _openHomeRoute(const FindRidesScreen()),
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.md),
           child: Row(

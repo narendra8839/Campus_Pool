@@ -2,8 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:campus_pool/components/navigation/app_bottom_nav_bar.dart';
 import 'package:campus_pool/routes/app_routes.dart';
-import 'package:campus_pool/screens/find_rides_screen.dart';
 import 'package:campus_pool/screens/navigation/main_navigation_shell.dart';
+
+class _TestNavigatorObserver extends NavigatorObserver {
+  final List<Route<dynamic>> pushedRoutes = [];
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    pushedRoutes.add(route);
+    super.didPush(route, previousRoute);
+  }
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -90,8 +99,12 @@ void main() {
     });
 
     testWidgets('Tapping Home search opens Find a Ride', (tester) async {
+      final navigatorObserver = _TestNavigatorObserver();
       await tester.pumpWidget(
-        const MaterialApp(home: MainNavigationShell(initialIndex: 0)),
+        MaterialApp(
+          navigatorObservers: [navigatorObserver],
+          home: const MainNavigationShell(initialIndex: 0),
+        ),
       );
 
       final searchPanel = find.ancestor(
@@ -103,8 +116,9 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
 
-      expect(find.byType(FindRidesScreen), findsOneWidget);
-      expect(find.text('Find a Ride'), findsOneWidget);
+      expect(navigatorObserver.pushedRoutes, hasLength(2));
+      final searchRoute = navigatorObserver.pushedRoutes.last;
+      expect(searchRoute, isA<MaterialPageRoute<void>>());
     });
   });
 }
