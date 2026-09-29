@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:campus_pool/components/navigation/app_bottom_nav_bar.dart';
 import 'package:campus_pool/routes/app_routes.dart';
+import 'package:campus_pool/screens/find_rides_screen.dart';
 import 'package:campus_pool/screens/navigation/main_navigation_shell.dart';
 
 void main() {
@@ -33,9 +34,7 @@ void main() {
   group('MainNavigationShell widget tests', () {
     testWidgets('Renders all 5 bottom navigation items', (tester) async {
       await tester.pumpWidget(
-        const MaterialApp(
-          home: MainNavigationShell(initialIndex: 0),
-        ),
+        const MaterialApp(home: MainNavigationShell(initialIndex: 0)),
       );
 
       // Verify bottom nav bar is rendered
@@ -49,12 +48,11 @@ void main() {
       expect(find.text('Profile'), findsOneWidget);
     });
 
-    testWidgets('Loads directly with initialIndex for specific tab (Profile)',
-        (tester) async {
+    testWidgets('Loads directly with initialIndex for specific tab (Profile)', (
+      tester,
+    ) async {
       await tester.pumpWidget(
-        const MaterialApp(
-          home: MainNavigationShell(initialIndex: 4),
-        ),
+        const MaterialApp(home: MainNavigationShell(initialIndex: 4)),
       );
 
       // Verify Profile screen is the visible item in the stack
@@ -65,12 +63,11 @@ void main() {
       expect(stack.index, 4);
     });
 
-    testWidgets('Tapping bottom nav tab switches the active tab',
-        (tester) async {
+    testWidgets('Tapping bottom nav tab switches the active tab', (
+      tester,
+    ) async {
       await tester.pumpWidget(
-        const MaterialApp(
-          home: MainNavigationShell(initialIndex: 0),
-        ),
+        const MaterialApp(home: MainNavigationShell(initialIndex: 0)),
       );
 
       final indexedStackFinder = find.byType(IndexedStack);
@@ -90,6 +87,24 @@ void main() {
 
       stack = tester.widget(indexedStackFinder);
       expect(stack.index, 1);
+    });
+
+    testWidgets('Tapping Home search opens Find a Ride', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(home: MainNavigationShell(initialIndex: 0)),
+      );
+
+      final searchPanel = find.ancestor(
+        of: find.text('Where do you want to go?'),
+        matching: find.byType(InkWell),
+      );
+      expect(searchPanel, findsOneWidget);
+      await tester.tap(searchPanel);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(find.byType(FindRidesScreen), findsOneWidget);
+      expect(find.text('Find a Ride'), findsOneWidget);
     });
   });
 }

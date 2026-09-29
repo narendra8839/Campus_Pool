@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
+import 'package:pointer_interceptor/pointer_interceptor.dart';
 import '../../components/components.dart';
 import '../../models/booking_model.dart';
 import '../../models/ride_model.dart';
@@ -305,85 +306,29 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     return Stack(
       children: [
         if (supportsMap)
-          MapLibreMap(
-            styleString: MapConfig.styleUrl,
-            initialCameraPosition: MapConfig.initialCameraPosition,
-            onMapCreated: (controller) {
-              _mapController = controller;
-              if (_homeMapStyleLoaded) _onRoutePreviewChanged();
-            },
-            onStyleLoadedCallback: () {
-              _homeMapStyleLoaded = true;
-              _onRoutePreviewChanged();
-            },
+          Positioned.fill(
+            child: MapLibreMap(
+              styleString: MapConfig.styleUrl,
+              initialCameraPosition: MapConfig.initialCameraPosition,
+              onMapCreated: (controller) {
+                _mapController = controller;
+                if (_homeMapStyleLoaded) _onRoutePreviewChanged();
+              },
+              onStyleLoadedCallback: () {
+                _homeMapStyleLoaded = true;
+                _onRoutePreviewChanged();
+              },
+            ),
           )
         else
-          const ColoredBox(
-            color: AppColors.background,
-            child: Center(
-              child: Text('Map preview is available on mobile and web.'),
-            ),
-          ),
-        Positioned(
-          top: MediaQuery.of(context).padding.top + AppSpacing.sm,
-          left: AppSpacing.marginMobile,
-          right: AppSpacing.marginMobile,
-          child: _buildMapSearchPanel(),
-        ),
-        Positioned(
-          top: MediaQuery.of(context).padding.top + 76,
-          right: AppSpacing.marginMobile,
-          child: ElevatedButton.icon(
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const MapScreen()),
-            ),
-            icon: const Icon(Icons.map_outlined, size: 18),
-            label: const Text('Campus Map'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.surface,
-              foregroundColor: AppColors.primary,
-              elevation: 4,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              shape: RoundedRectangleBorder(
-                borderRadius: AppSpacing.radiusFull,
+          const Positioned.fill(
+            child: ColoredBox(
+              color: AppColors.background,
+              child: Center(
+                child: Text('Map preview is available on mobile and web.'),
               ),
             ),
           ),
-        ),
-        if (RoutePreviewStore.instance.route != null)
-          Positioned(
-            left: AppSpacing.marginMobile,
-            right: AppSpacing.marginMobile,
-            top: MediaQuery.of(context).padding.top + 132,
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                child: Text(
-                  _homeRouteError ??
-                      'Route: ${RoutePreviewStore.instance.route!.formattedDistance} · '
-                          'Fare: ${formatRideFare(RoutePreviewStore.instance.route!.distanceMeters)}/seat',
-                  style: AppTypography.bodySm,
-                ),
-              ),
-            ),
-          ),
-        Positioned(
-          right: AppSpacing.marginMobile,
-          bottom: 300,
-          child: FloatingActionButton.small(
-            heroTag: 'home-location',
-            backgroundColor: AppColors.surface,
-            foregroundColor: AppColors.primary,
-            onPressed: () => _mapController?.animateCamera(
-              CameraUpdate.newCameraPosition(MapConfig.initialCameraPosition),
-            ),
-            child: const Icon(Icons.my_location_rounded),
-          ),
-        ),
         DraggableScrollableSheet(
           initialChildSize: 0.30,
           minChildSize: 0.18,
@@ -450,6 +395,66 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   ),
               ],
             ),
+          ),
+        ),
+        Positioned(
+          top: MediaQuery.of(context).padding.top + AppSpacing.sm,
+          left: AppSpacing.marginMobile,
+          right: AppSpacing.marginMobile,
+          child: PointerInterceptor(child: _buildMapSearchPanel()),
+        ),
+        Positioned(
+          top: MediaQuery.of(context).padding.top + 76,
+          right: AppSpacing.marginMobile,
+          child: ElevatedButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const MapScreen()),
+            ),
+            icon: const Icon(Icons.map_outlined, size: 18),
+            label: const Text('Campus Map'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.surface,
+              foregroundColor: AppColors.primary,
+              elevation: 4,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: AppSpacing.radiusFull,
+              ),
+            ),
+          ),
+        ),
+        if (RoutePreviewStore.instance.route != null)
+          Positioned(
+            left: AppSpacing.marginMobile,
+            right: AppSpacing.marginMobile,
+            top: MediaQuery.of(context).padding.top + 132,
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                child: Text(
+                  _homeRouteError ??
+                      'Route: ${RoutePreviewStore.instance.route!.formattedDistance} · '
+                          'Fare: ${formatRideFare(RoutePreviewStore.instance.route!.distanceMeters)}/seat',
+                  style: AppTypography.bodySm,
+                ),
+              ),
+            ),
+          ),
+        Positioned(
+          right: AppSpacing.marginMobile,
+          bottom: 300,
+          child: FloatingActionButton.small(
+            heroTag: 'home-location',
+            backgroundColor: AppColors.surface,
+            foregroundColor: AppColors.primary,
+            onPressed: () => _mapController?.animateCamera(
+              CameraUpdate.newCameraPosition(MapConfig.initialCameraPosition),
+            ),
+            child: const Icon(Icons.my_location_rounded),
           ),
         ),
       ],
