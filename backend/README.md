@@ -178,6 +178,27 @@ policy across instances. Public Nominatim is subject to its
 sustained production traffic, use a compliant hosted service or operate your
 own instance.
 
+### Driving routes
+
+The backend proxies driving directions through OSRM:
+
+```text
+GET /api/routing/route?originLat=18.5&originLon=73.8&destinationLat=18.46&destinationLon=73.86
+```
+
+Responses include road-route GeoJSON coordinates in `[longitude, latitude]`
+order, distance in metres, and duration in seconds. The Campus Map can route
+between two selected places and displays the returned route, distance, and
+estimated duration. The endpoint validates coordinates and reports no-route,
+timeout, and provider errors explicitly. Identical requests are cached briefly
+and outbound requests are scheduled at most once per second per backend process.
+
+`OSRM_BASE_URL` can point at a compatible OSRM service. The default public
+`router.project-osrm.org` server is for reasonable, low-volume use and has no
+service guarantee; configure a hosted or self-managed OSRM instance for
+production traffic. Process-local caching and scheduling do not coordinate
+multiple deployed instances.
+
 Only bikes and scooties can be offered. If an older database contains
 four-wheeler records, remove those rides and reset the associated vehicle
 details with:

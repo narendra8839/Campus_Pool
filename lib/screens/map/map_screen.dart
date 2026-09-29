@@ -4,8 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 import '../../models/corridor_model.dart';
 import '../../models/geocoding_result.dart';
+import '../../models/route_result.dart';
 import '../../services/geocoding_service.dart';
 import '../../services/route_service.dart';
+import '../../services/routing_service.dart';
 import 'map_config.dart';
 import '../../utils/runtime_environment.dart';
 
@@ -29,12 +31,20 @@ class _MapScreenState extends State<MapScreen> {
   List<GeocodingResult> _searchResults = const [];
   GeocodingResult? _selectedPlace;
   Circle? _searchCircle;
+  final List<Circle> _routeMarkers = [];
+  Line? _routeLine;
+  GeocodingResult? _routeOrigin;
+  GeocodingResult? _routeDestination;
+  RouteResult? _routeResult;
   String? _searchError;
+  String? _routingError;
   bool _searchLoading = false;
   bool _reverseLoading = false;
+  bool _routing = false;
   int _searchRequestId = 0;
   int _reverseRequestId = 0;
   int _mapSelectionRequestId = 0;
+  int _routingRequestId = 0;
 
   @override
   void initState() {
@@ -67,7 +77,10 @@ class _MapScreenState extends State<MapScreen> {
       _mapController = null;
       _hubsLoading = false;
       _searchCircle = null;
+      _routeLine = null;
+      _routeMarkers.clear();
       _mapSelectionRequestId++;
+      _mapController = null;
       _mapInstance++;
     });
     _startLoadTimeout();
@@ -89,6 +102,7 @@ class _MapScreenState extends State<MapScreen> {
       _searchLoading = false;
       _reverseLoading = false;
       _selectedPlace = null;
+      _routingError = null;
     });
     if (_searchCircle != null) {
       _removeSearchCircleSafely();
@@ -150,6 +164,7 @@ class _MapScreenState extends State<MapScreen> {
       _searchError = null;
       _searchLoading = false;
       _selectedPlace = null;
+      _routingError = null;
       _reverseLoading = true;
     });
     try {
@@ -227,6 +242,277 @@ class _MapScreenState extends State<MapScreen> {
         setState(() => _searchError = 'Could not clear map selection: $error');
       }
     }
+  }
+
+  Future<void> _setRouteEndpoint({required bool origin}) async {
+    final place = _selectedPlace;
+    if (place == null) return;
+
+    ++_routingRequestId;
+    try {
+      await _clearRouteAnnotations();
+      if (!mounted) return;
+      setState(() {
+        if (origin) {
+          _routeOrigin = place;
+        } else {
+          _routeDestination = place;
+        }
+        _routeResult = null;
+        _routingError = null;
+        _routing = false;
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _routingError = 'Could not update route locations: $error',
+        );
+      }
+    }
+  }
+
+  Future<void> _calculateRoute() async {
+    final origin = _routeOrigin;
+    final destination = _routeDestination;
+    if (origin == null || destination == null) return;
+    if (origin.latitude == destination.latitude &&
+        origin.longitude == destination.longitude) {
+      setState(
+        () => _routingError = 'Choose two different places for the route.',
+      );
+      return;
+    }
+
+    final requestId = ++_routingRequestId;
+    setState(() {
+      _routing = true;
+      _routingError = null;
+      _routeResult = null;
+    });
+
+    try {
+      await _clearRouteAnnotations();
+      final result = await RoutingService.getDrivingRoute(
+        originLatitude: origin.latitude,
+        originLongitude: origin.longitude,
+        destinationLatitude: destination.latitude,
+        destinationLongitude: destination.longitude,
+      );
+      if (!mounted || requestId != _routingRequestId) return;
+      setState(() {
+        _routeResult = result;
+      });
+      await _drawRoute(result, origin, destination);
+      if (!mounted || requestId != _routingRequestId) return;
+      setState(() => _routing = false);
+    } catch (error) {
+      if (!mounted || requestId != _routingRequestId) return;
+      setState(() {
+        _routingError = 'Route could not be calculated: $error';
+        _routing = false;
+      });
+    }
+  }
+
+  Future<void> _clearRouteAnnotations() async {
+    final controller = _mapController;
+    final line = _routeLine;
+    final markers = List<Circle>.of(_routeMarkers);
+    _routeLine = null;
+    _routeMarkers.clear();
+    if (controller == null) return;
+    if (line != null) await controller.removeLine(line);
+    if (markers.isNotEmpty) await controller.removeCircles(markers);
+  }
+
+  Future<void> _drawRoute(
+    RouteResult route,
+    GeocodingResult origin,
+    GeocodingResult destination,
+  ) async {
+    final controller = _mapController;
+    if (controller == null || !_styleLoaded) return;
+
+    try {
+      final points = route.coordinates
+          .map((point) => LatLng(point[1], point[0]))
+          .toList();
+      _routeLine = await controller.addLine(
+        LineOptions(
+          geometry: points,
+          lineColor: '#1565C0',
+          lineWidth: 6,
+          lineOpacity: 0.9,
+          lineJoin: 'round',
+        ),
+      );
+      _routeMarkers.addAll(
+        await controller.addCircles([
+          CircleOptions(
+            geometry: LatLng(origin.latitude, origin.longitude),
+            circleColor: '#2E7D32',
+            circleRadius: 9,
+            circleStrokeColor: '#FFFFFF',
+            circleStrokeWidth: 2,
+          ),
+          CircleOptions(
+            geometry: LatLng(destination.latitude, destination.longitude),
+            circleColor: '#C62828',
+            circleRadius: 9,
+            circleStrokeColor: '#FFFFFF',
+            circleStrokeWidth: 2,
+          ),
+        ]),
+      );
+      final center = LatLng(
+        (origin.latitude + destination.latitude) / 2,
+        (origin.longitude + destination.longitude) / 2,
+      );
+      final zoom = route.distanceMeters > 20000
+          ? 11.5
+          : route.distanceMeters > 10000
+          ? 12.5
+          : 13.5;
+      await controller.animateCamera(CameraUpdate.newLatLngZoom(center, zoom));
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _routingError = 'Route found but could not be drawn: $error',
+        );
+      }
+    }
+  }
+
+  Widget _buildRoutePanel() {
+    final selectedPlace = _selectedPlace;
+    final origin = _routeOrigin;
+    final destination = _routeDestination;
+    return Positioned(
+      left: 12,
+      right: 12,
+      bottom: 12,
+      child: SafeArea(
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (selectedPlace != null) ...[
+                  Text(
+                    selectedPlace.displayName,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _routing
+                            ? null
+                            : () => _setRouteEndpoint(origin: true),
+                        icon: const Icon(Icons.trip_origin),
+                        label: const Text('Set start'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _routing
+                            ? null
+                            : () => _setRouteEndpoint(origin: false),
+                        icon: const Icon(Icons.flag_outlined),
+                        label: const Text('Set destination'),
+                      ),
+                    ],
+                  ),
+                ],
+                if (origin != null || destination != null) ...[
+                  if (selectedPlace != null) const Divider(),
+                  Text('Start: ${origin?.displayName ?? 'Choose a place'}'),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Destination: ${destination?.displayName ?? 'Choose a place'}',
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed:
+                              origin != null && destination != null && !_routing
+                              ? _calculateRoute
+                              : null,
+                          icon: _routing
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.directions_car),
+                          label: Text(
+                            _routing ? 'Routing…' : 'Get driving route',
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Clear route',
+                        onPressed: _routing
+                            ? null
+                            : () async {
+                                ++_routingRequestId;
+                                try {
+                                  await _clearRouteAnnotations();
+                                  if (!mounted) return;
+                                  setState(() {
+                                    _routeOrigin = null;
+                                    _routeDestination = null;
+                                    _routeResult = null;
+                                    _routingError = null;
+                                  });
+                                } catch (error) {
+                                  if (mounted) {
+                                    setState(() {
+                                      _routingError =
+                                          'Could not clear route: $error';
+                                    });
+                                  }
+                                }
+                              },
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                ],
+                if (_routeResult != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_routeResult!.formattedDistance} · ${_routeResult!.formattedDuration} estimated by car',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ],
+                if (_routingError != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    _routingError!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 4),
+                Text(
+                  '© OpenStreetMap contributors · Routing by OSRM',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _loadHubs() async {
@@ -321,6 +607,12 @@ class _MapScreenState extends State<MapScreen> {
                   _loadHubs();
                   final place = _selectedPlace;
                   if (place != null) _showPlaceOnMap(place);
+                  final route = _routeResult;
+                  final origin = _routeOrigin;
+                  final destination = _routeDestination;
+                  if (route != null && origin != null && destination != null) {
+                    _drawRoute(route, origin, destination);
+                  }
                 }
               },
               onMapClick: _onMapTap,
@@ -331,6 +623,12 @@ class _MapScreenState extends State<MapScreen> {
                   _loadHubs();
                   final place = _selectedPlace;
                   if (place != null) _showPlaceOnMap(place);
+                  final route = _routeResult;
+                  final origin = _routeOrigin;
+                  final destination = _routeDestination;
+                  if (route != null && origin != null && destination != null) {
+                    _drawRoute(route, origin, destination);
+                  }
                 });
               },
             )
@@ -465,7 +763,12 @@ class _MapScreenState extends State<MapScreen> {
                 ),
               ),
             ),
-          if (_hubsError != null && _styleLoaded)
+          if (_styleLoaded &&
+              (_selectedPlace != null ||
+                  _routeOrigin != null ||
+                  _routeDestination != null))
+            _buildRoutePanel()
+          else if (_hubsError != null && _styleLoaded)
             Positioned(
               left: 16,
               right: 16,
@@ -476,36 +779,8 @@ class _MapScreenState extends State<MapScreen> {
                   child: Text(_hubsError!),
                 ),
               ),
-            ),
-          if (_selectedPlace != null && _styleLoaded)
-            Positioned(
-              left: 12,
-              right: 12,
-              bottom: 12,
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _selectedPlace!.displayName,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '© OpenStreetMap contributors',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
             )
-          else if (_hubsError == null && _styleLoaded && _hubCount > 0)
+          else if (_styleLoaded && _hubCount > 0)
             Positioned(
               left: 16,
               bottom: 12,
@@ -521,7 +796,10 @@ class _MapScreenState extends State<MapScreen> {
                 ),
               ),
             ),
-          if (_selectedPlace == null && _styleLoaded)
+          if (_styleLoaded &&
+              _selectedPlace == null &&
+              _routeOrigin == null &&
+              _routeDestination == null)
             const Positioned(
               right: 8,
               bottom: 12,
@@ -529,7 +807,7 @@ class _MapScreenState extends State<MapScreen> {
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   child: Text(
-                    '© OpenStreetMap contributors',
+                    '© OpenStreetMap contributors · OSRM',
                     style: TextStyle(fontSize: 10),
                   ),
                 ),
