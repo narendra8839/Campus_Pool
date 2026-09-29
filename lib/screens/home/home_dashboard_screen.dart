@@ -6,6 +6,9 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 import '../../components/components.dart';
 import '../../models/booking_model.dart';
 import '../../models/ride_model.dart';
+import '../../services/route_preview_store.dart';
+import '../../models/geocoding_result.dart';
+import '../../models/route_result.dart';
 import '../../services/auth_service.dart';
 import '../../services/booking_service.dart';
 import '../../services/ride_service.dart';
@@ -24,6 +27,7 @@ import '../rides/my_rides_screen.dart';
 import '../map/map_screen.dart';
 import '../map/map_config.dart';
 import '../../utils/runtime_environment.dart';
+import '../../utils/ride_fare.dart';
 
 /// Campus Pool Home Dashboard Screen
 /// Based on Stitch design: projects/4131098890607133930/screens/f3c45ada102f44db80a425cc7c5598b1
@@ -49,6 +53,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   String? _dashboardError;
   String _displayName = 'there';
   MapLibreMapController? _mapController;
+  Line? _homeRouteLine;
+  final List<Circle> _homeRouteMarkers = [];
+  int _homeRouteRequestId = 0;
+  bool _homeMapStyleLoaded = false;
+  String? _homeRouteError;
 
   @override
   void initState() {
@@ -59,6 +68,126 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               ? AuthService.cachedUser!.name.trim()
               : 'there');
     _loadDashboardData();
+    RoutePreviewStore.instance.addListener(_onRoutePreviewChanged);
+  }
+
+  @override
+  void dispose() {
+    RoutePreviewStore.instance.removeListener(_onRoutePreviewChanged);
+    super.dispose();
+  }
+
+  void _onRoutePreviewChanged() {
+    final route = RoutePreviewStore.instance.route;
+    final origin = RoutePreviewStore.instance.origin;
+    final destination = RoutePreviewStore.instance.destination;
+    if (route == null || origin == null || destination == null) {
+      _clearHomeRoute();
+      return;
+    }
+    _displayHomeRoute(route, origin, destination);
+  }
+
+  Future<void> _clearHomeRoute() async {
+    ++_homeRouteRequestId;
+    final controller = _mapController;
+    final routeLine = _homeRouteLine;
+    final markers = List<Circle>.of(_homeRouteMarkers);
+    _homeRouteLine = null;
+    _homeRouteMarkers.clear();
+    if (controller == null) return;
+    try {
+      if (routeLine != null) await controller.removeLine(routeLine);
+      if (markers.isNotEmpty) await controller.removeCircles(markers);
+      if (mounted) setState(() => _homeRouteError = null);
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _homeRouteError = 'Could not clear route from map: $error',
+        );
+      }
+    }
+  }
+
+  Future<void> _displayHomeRoute(
+    RouteResult route,
+    GeocodingResult origin,
+    GeocodingResult destination,
+  ) async {
+    final controller = _mapController;
+    if (controller == null || !_homeMapStyleLoaded) return;
+    final requestId = ++_homeRouteRequestId;
+    try {
+      final oldLine = _homeRouteLine;
+      final oldMarkers = List<Circle>.of(_homeRouteMarkers);
+      _homeRouteLine = null;
+      _homeRouteMarkers.clear();
+      if (oldLine != null) await controller.removeLine(oldLine);
+      if (oldMarkers.isNotEmpty) await controller.removeCircles(oldMarkers);
+      if (!mounted || requestId != _homeRouteRequestId) return;
+
+      final points = route.coordinates
+          .map((point) => LatLng(point[1], point[0]))
+          .toList();
+      final routeLine = await controller.addLine(
+        LineOptions(
+          geometry: points,
+          lineColor: '#1565C0',
+          lineWidth: 6,
+          lineOpacity: 0.9,
+          lineJoin: 'round',
+        ),
+      );
+      if (!mounted || requestId != _homeRouteRequestId) {
+        await controller.removeLine(routeLine);
+        return;
+      }
+      _homeRouteLine = routeLine;
+      final routeMarkers = await controller.addCircles([
+        CircleOptions(
+          geometry: LatLng(origin.latitude, origin.longitude),
+          circleColor: '#2E7D32',
+          circleRadius: 9,
+          circleStrokeColor: '#FFFFFF',
+          circleStrokeWidth: 2,
+        ),
+        CircleOptions(
+          geometry: LatLng(destination.latitude, destination.longitude),
+          circleColor: '#C62828',
+          circleRadius: 9,
+          circleStrokeColor: '#FFFFFF',
+          circleStrokeWidth: 2,
+        ),
+      ]);
+      if (!mounted || requestId != _homeRouteRequestId) {
+        await controller.removeCircles(routeMarkers);
+        return;
+      }
+      _homeRouteMarkers.addAll(routeMarkers);
+      if (!mounted || requestId != _homeRouteRequestId) return;
+      await controller.animateCamera(
+        CameraUpdate.newLatLngZoom(
+          LatLng(
+            (origin.latitude + destination.latitude) / 2,
+            (origin.longitude + destination.longitude) / 2,
+          ),
+          route.distanceMeters > 20000
+              ? 11.5
+              : route.distanceMeters > 10000
+              ? 12.5
+              : 13.5,
+        ),
+      );
+      if (mounted && requestId == _homeRouteRequestId) {
+        setState(() => _homeRouteError = null);
+      }
+    } catch (error) {
+      if (mounted && requestId == _homeRouteRequestId) {
+        setState(
+          () => _homeRouteError = 'Could not display route on map: $error',
+        );
+      }
+    }
   }
 
   Future<void> _loadDashboardData() async {
@@ -168,7 +297,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   }
 
   Widget _buildMapFirstHome() {
-    final supportsMap = !isFlutterTest &&
+    final supportsMap =
+        !isFlutterTest &&
         (kIsWeb ||
             defaultTargetPlatform == TargetPlatform.android ||
             defaultTargetPlatform == TargetPlatform.iOS);
@@ -178,7 +308,14 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           MapLibreMap(
             styleString: MapConfig.styleUrl,
             initialCameraPosition: MapConfig.initialCameraPosition,
-            onMapCreated: (controller) => _mapController = controller,
+            onMapCreated: (controller) {
+              _mapController = controller;
+              if (_homeMapStyleLoaded) _onRoutePreviewChanged();
+            },
+            onStyleLoadedCallback: () {
+              _homeMapStyleLoaded = true;
+              _onRoutePreviewChanged();
+            },
           )
         else
           const ColoredBox(
@@ -214,6 +351,26 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             ),
           ),
         ),
+        if (RoutePreviewStore.instance.route != null)
+          Positioned(
+            left: AppSpacing.marginMobile,
+            right: AppSpacing.marginMobile,
+            top: MediaQuery.of(context).padding.top + 132,
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                child: Text(
+                  _homeRouteError ??
+                      'Route: ${RoutePreviewStore.instance.route!.formattedDistance} · '
+                          'Fare: ${formatRideFare(RoutePreviewStore.instance.route!.distanceMeters)}/seat',
+                  style: AppTypography.bodySm,
+                ),
+              ),
+            ),
+          ),
         Positioned(
           right: AppSpacing.marginMobile,
           bottom: 300,
@@ -387,9 +544,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   } else {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (_) => const AlertsScreen(),
-                      ),
+                      MaterialPageRoute(builder: (_) => const AlertsScreen()),
                     );
                   }
                 },

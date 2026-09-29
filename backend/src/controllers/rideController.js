@@ -1,5 +1,6 @@
 const prisma = require('../config/prisma');
-const { fareForDistance, routeDistanceKilometres } = require('../utils/fareCalculator');
+const { priceRide } = require('../services/ridePricingService');
+const { RoutingError } = require('../services/osrmService');
 const { rankRides } = require('../services/ncfService');
 
 const routeInclude = {
@@ -117,6 +118,12 @@ const createRide = async (req, res, next) => {
       }
     }
 
+    const pricing = await priceRide({
+      origin: { latitude: originLat, longitude: originLng },
+      destination: { latitude: destLat, longitude: destLng },
+      waypoints,
+    });
+
     const ride = await prisma.ride.create({
       data: {
         driverId: req.user.id,
@@ -129,17 +136,13 @@ const createRide = async (req, res, next) => {
         destAddress: destAddress || '',
         destLat: parseFloat(destLat) || 0.0,
         destLng: parseFloat(destLng) || 0.0,
-        waypoints: waypoints || [],
+        waypoints: pricing.waypoints,
         departureTime: depDate,
         totalSeats: seats,
         availableSeats: seats,
         vehicleType: normalizedVehicleType,
         helmetProvided: helmetProvided !== undefined ? helmetProvided : req.user.helmetProvided ?? true,
-        contribution: fareForDistance(routeDistanceKilometres(
-          { latitude: originLat, longitude: originLng },
-          { latitude: destLat, longitude: destLng },
-          waypoints,
-        )),
+        contribution: pricing.contribution,
         notes: notes || '',
       },
       include: {
@@ -168,6 +171,12 @@ const createRide = async (req, res, next) => {
       data: ride,
     });
   } catch (error) {
+    if (error instanceof RoutingError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
     next(error);
   }
 };

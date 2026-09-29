@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import '../../models/corridor_model.dart';
+import '../../models/geocoding_result.dart';
+import '../../models/route_result.dart';
+import '../../services/route_preview_store.dart';
 import '../../services/route_service.dart';
+import '../../services/routing_service.dart';
 import '../../services/ride_service.dart';
+import '../../utils/ride_fare.dart';
 import 'navigation/main_navigation_shell.dart';
 
 class OfferRideScreen extends StatefulWidget {
@@ -28,6 +33,10 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
   HubModel? _selectedDestinationHub;
   bool _loadingRoutes = true;
   bool _returningFromVit = false;
+  bool _routeLoading = false;
+  String? _routeError;
+  RouteResult? _routePreview;
+  int _routeRequestId = 0;
 
   @override
   void initState() {
@@ -41,6 +50,7 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
     _destinationController.dispose();
     _capacityController.dispose();
     _notesController.dispose();
+    ++_routeRequestId;
     super.dispose();
   }
 
@@ -54,8 +64,12 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
         _selectMorningDefaults();
         _loadingRoutes = false;
       });
+      _updateRoutePreview();
     } catch (_) {
-      if (mounted) setState(() => _loadingRoutes = false);
+      if (mounted) {
+        setState(() => _loadingRoutes = false);
+        _updateRoutePreview();
+      }
     }
   }
 
@@ -83,6 +97,75 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
       _selectEveningDefaults();
     } else {
       _selectMorningDefaults();
+    }
+  }
+
+  Future<void> _updateRoutePreview() async {
+    final origin = _selectedOriginHub;
+    final destination = _selectedDestinationHub;
+    if (origin == null ||
+        destination == null ||
+        origin.latitude == 0 ||
+        origin.longitude == 0 ||
+        destination.latitude == 0 ||
+        destination.longitude == 0) {
+      ++_routeRequestId;
+      RoutePreviewStore.instance.clear();
+      if (mounted) {
+        setState(() {
+          _routePreview = null;
+          _routeLoading = false;
+          _routeError = null;
+        });
+      }
+      return;
+    }
+
+    final requestId = ++_routeRequestId;
+    RoutePreviewStore.instance.clear();
+    setState(() {
+      _routeLoading = true;
+      _routeError = null;
+      _routePreview = null;
+    });
+    try {
+      final route = await RoutingService.getDrivingRoute(
+        originLatitude: origin.latitude,
+        originLongitude: origin.longitude,
+        destinationLatitude: destination.latitude,
+        destinationLongitude: destination.longitude,
+      );
+      if (!mounted || requestId != _routeRequestId) return;
+      final routeOrigin = GeocodingResult(
+        placeId: origin.id,
+        displayName: origin.name,
+        latitude: origin.latitude,
+        longitude: origin.longitude,
+        type: 'hub',
+      );
+      final routeDestination = GeocodingResult(
+        placeId: destination.id,
+        displayName: destination.name,
+        latitude: destination.latitude,
+        longitude: destination.longitude,
+        type: 'hub',
+      );
+      RoutePreviewStore.instance.setPreview(
+        route: route,
+        origin: routeOrigin,
+        destination: routeDestination,
+      );
+      setState(() {
+        _routePreview = route;
+        _routeLoading = false;
+      });
+    } catch (error) {
+      if (!mounted || requestId != _routeRequestId) return;
+      RoutePreviewStore.instance.clear();
+      setState(() {
+        _routeError = 'Could not calculate road route: $error';
+        _routeLoading = false;
+      });
     }
   }
 
@@ -219,6 +302,7 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
                       _selectedCorridor = corridor;
                       _selectMorningDefaults();
                     });
+                    _updateRoutePreview();
                   },
                 ),
                 const SizedBox(height: 16),
@@ -235,6 +319,7 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
                   selected: {_returningFromVit},
                   onSelectionChanged: (selection) {
                     setState(() => _selectDirection(selection.first));
+                    _updateRoutePreview();
                   },
                 ),
                 const SizedBox(height: 16),
@@ -257,6 +342,7 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
                       _selectedOriginHub = hub;
                       _originController.text = hub.name;
                     });
+                    _updateRoutePreview();
                   },
                 ),
                 const SizedBox(height: 16),
@@ -279,6 +365,7 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
                       _selectedDestinationHub = hub;
                       _destinationController.text = hub.name;
                     });
+                    _updateRoutePreview();
                   },
                 ),
                 const SizedBox(height: 16),
@@ -314,6 +401,62 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
                   return null;
                 },
               ),
+              const SizedBox(height: 16),
+              if (_routeLoading)
+                const Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Text('Calculating road distance and fare…'),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else if (_routePreview != null)
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Road distance: ${_routePreview!.formattedDistance}',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Estimated fare: ${formatRideFare(_routePreview!.distanceMeters)} per seat (₹5/km)',
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Estimated driving time: ${_routePreview!.formattedDuration}',
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'The route is shown on the Home map.',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else if (_routeError != null)
+                Card(
+                  color: Theme.of(context).colorScheme.errorContainer,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(_routeError!),
+                  ),
+                ),
               const SizedBox(height: 16),
               InkWell(
                 onTap: _selectDateTime,

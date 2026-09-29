@@ -208,10 +208,15 @@ npm run cleanup:four-wheelers
 ```
 
 Fare is calculated by the backend at **₹5 per kilometre per passenger seat**.
-The distance is calculated from the ride waypoints when available, otherwise
-from the origin and destination coordinates. A booking's total is the
+For rides with valid endpoint coordinates, the backend uses OSRM's driving
+distance and stores the returned road geometry as ride waypoints; a routing
+provider error prevents the ride from being created rather than silently
+quoting a straight-line fare. When coordinates are unavailable, the backend
+retains the legacy waypoint/straight-line estimate. A booking's total is the
 per-seat route fare multiplied by the number of requested seats; client
-submitted contribution values are ignored.
+submitted contribution values are ignored. The Offer Ride form previews the
+road distance and per-seat fare, and the selected route is drawn on the Home
+map.
 
 To generate larger deterministic JSON and CSV datasets for analysis or bulk
 loading, run:
