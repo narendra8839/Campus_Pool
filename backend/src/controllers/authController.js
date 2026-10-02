@@ -141,37 +141,50 @@ const loginUser = async (req, res, next) => {
 // @access  Private
 const getMe = async (req, res, next) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phone: true,
-        college: true,
-        rollNumber: true,
-        gender: true,
-        avatar: true,
-        roles: true,
-        vehicleType: true,
-        vehicleModel: true,
-        vehiclePlate: true,
-        vehicleColor: true,
-        helmetProvided: true,
-        vehicleSeats: true,
-        emergencyName: true,
-        emergencyPhone: true,
-        emergencyRelation: true,
-        ratingAvg: true,
-        ratingCount: true,
-        isVerified: true,
-        createdAt: true,
-      },
-    });
+    const [user, ratingSummary] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          college: true,
+          rollNumber: true,
+          gender: true,
+          avatar: true,
+          roles: true,
+          vehicleType: true,
+          vehicleModel: true,
+          vehiclePlate: true,
+          vehicleColor: true,
+          helmetProvided: true,
+          vehicleSeats: true,
+          emergencyName: true,
+          emergencyPhone: true,
+          emergencyRelation: true,
+          ratingAvg: true,
+          ratingCount: true,
+          isVerified: true,
+          createdAt: true,
+        },
+      }),
+      prisma.review.aggregate({
+        where: { revieweeId: req.user.id },
+        _avg: { rating: true },
+        _count: { rating: true },
+      }),
+    ]);
 
     res.json({
       success: true,
-      data: user,
+      data: user
+        ? {
+            ...user,
+            ratingAvg: ratingSummary._avg.rating ?? 5,
+            ratingCount: ratingSummary._count.rating,
+          }
+        : null,
     });
   } catch (error) {
     next(error);

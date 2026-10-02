@@ -1,7 +1,9 @@
 import 'dart:math' show Point;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
+import 'package:pointer_interceptor/pointer_interceptor.dart';
 import '../../models/corridor_model.dart';
 import '../../models/geocoding_result.dart';
 import '../../models/route_result.dart';
@@ -392,122 +394,126 @@ class _MapScreenState extends State<MapScreen> {
       right: 12,
       bottom: 12,
       child: SafeArea(
-        child: Card(
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (selectedPlace != null) ...[
-                  Text(
-                    selectedPlace.displayName,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: 4),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      OutlinedButton.icon(
-                        onPressed: _routing
-                            ? null
-                            : () => _setRouteEndpoint(origin: true),
-                        icon: const Icon(Icons.trip_origin),
-                        label: const Text('Set start'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: _routing
-                            ? null
-                            : () => _setRouteEndpoint(origin: false),
-                        icon: const Icon(Icons.flag_outlined),
-                        label: const Text('Set destination'),
-                      ),
-                    ],
-                  ),
-                ],
-                if (origin != null || destination != null) ...[
-                  if (selectedPlace != null) const Divider(),
-                  Text('Start: ${origin?.displayName ?? 'Choose a place'}'),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Destination: ${destination?.displayName ?? 'Choose a place'}',
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed:
-                              origin != null && destination != null && !_routing
-                              ? _calculateRoute
-                              : null,
-                          icon: _routing
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.directions_car),
-                          label: Text(
-                            _routing ? 'Routing…' : 'Get driving route',
+        child: PointerInterceptor(
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (selectedPlace != null) ...[
+                    Text(
+                      selectedPlace.displayName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: _routing
+                              ? null
+                              : () => _setRouteEndpoint(origin: true),
+                          icon: const Icon(Icons.trip_origin),
+                          label: const Text('Set start'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _routing
+                              ? null
+                              : () => _setRouteEndpoint(origin: false),
+                          icon: const Icon(Icons.flag_outlined),
+                          label: const Text('Set destination'),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (origin != null || destination != null) ...[
+                    if (selectedPlace != null) const Divider(),
+                    Text('Start: ${origin?.displayName ?? 'Choose a place'}'),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Destination: ${destination?.displayName ?? 'Choose a place'}',
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed:
+                                origin != null &&
+                                    destination != null &&
+                                    !_routing
+                                ? _calculateRoute
+                                : null,
+                            icon: _routing
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.directions_car),
+                            label: Text(
+                              _routing ? 'Routing…' : 'Get driving route',
+                            ),
                           ),
                         ),
-                      ),
-                      IconButton(
-                        tooltip: 'Clear route',
-                        onPressed: _routing
-                            ? null
-                            : () async {
-                                ++_routingRequestId;
-                                try {
-                                  await _clearRouteAnnotations();
-                                  if (!mounted) return;
-                                  setState(() {
-                                    _routeOrigin = null;
-                                    _routeDestination = null;
-                                    _routeResult = null;
-                                    _routingError = null;
-                                  });
-                                } catch (error) {
-                                  if (mounted) {
+                        IconButton(
+                          tooltip: 'Clear route',
+                          onPressed: _routing
+                              ? null
+                              : () async {
+                                  ++_routingRequestId;
+                                  try {
+                                    await _clearRouteAnnotations();
+                                    if (!mounted) return;
                                     setState(() {
-                                      _routingError =
-                                          'Could not clear route: $error';
+                                      _routeOrigin = null;
+                                      _routeDestination = null;
+                                      _routeResult = null;
+                                      _routingError = null;
                                     });
+                                  } catch (error) {
+                                    if (mounted) {
+                                      setState(() {
+                                        _routingError =
+                                            'Could not clear route: $error';
+                                      });
+                                    }
                                   }
-                                }
-                              },
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-                ],
-                if (_routeResult != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    '${_routeResult!.formattedDistance} · ${_routeResult!.formattedDuration} estimated by car',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                ],
-                if (_routingError != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    _routingError!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
+                                },
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
                     ),
+                  ],
+                  if (_routeResult != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '${_routeResult!.formattedDistance} · ${_routeResult!.formattedDuration} estimated by car',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ],
+                  if (_routingError != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      _routingError!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 4),
+                  Text(
+                    '© OpenStreetMap contributors · Routing by OSRM',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
-                const SizedBox(height: 4),
-                Text(
-                  '© OpenStreetMap contributors · Routing by OSRM',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
+              ),
             ),
           ),
         ),
@@ -601,6 +607,9 @@ class _MapScreenState extends State<MapScreen> {
               key: ValueKey(_mapInstance),
               styleString: MapConfig.styleUrl,
               initialCameraPosition: MapConfig.initialCameraPosition,
+              gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+                Factory<EagerGestureRecognizer>(() => EagerGestureRecognizer()),
+              },
               onMapCreated: (controller) {
                 _mapController = controller;
                 if (_styleLoaded) {
@@ -641,125 +650,129 @@ class _MapScreenState extends State<MapScreen> {
               top: 12,
               left: 12,
               right: 12,
-              child: SafeArea(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Material(
-                      elevation: 4,
-                      borderRadius: BorderRadius.circular(12),
-                      child: TextField(
-                        controller: _searchController,
-                        onChanged: _onSearchChanged,
-                        onSubmitted: (_) => _searchPlaces(),
-                        textInputAction: TextInputAction.search,
-                        decoration: InputDecoration(
-                          hintText: 'Search places or addresses',
-                          prefixIcon: const Icon(Icons.search),
-                          suffixIcon: _searchLoading
-                              ? const Padding(
-                                  padding: EdgeInsets.all(14),
-                                  child: SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
-                                )
-                              : Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (_searchController.text.isNotEmpty)
-                                      IconButton(
-                                        tooltip: 'Clear search',
-                                        icon: const Icon(Icons.clear),
-                                        onPressed: () {
-                                          ++_searchRequestId;
-                                          ++_reverseRequestId;
-                                          ++_mapSelectionRequestId;
-                                          _searchController.clear();
-                                          setState(() {
-                                            _searchResults = const [];
-                                            _searchError = null;
-                                            _selectedPlace = null;
-                                            _reverseLoading = false;
-                                          });
-                                          _removeSearchCircleSafely();
-                                        },
+              child: PointerInterceptor(
+                child: SafeArea(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Material(
+                        elevation: 4,
+                        borderRadius: BorderRadius.circular(12),
+                        child: TextField(
+                          controller: _searchController,
+                          onChanged: _onSearchChanged,
+                          onSubmitted: (_) => _searchPlaces(),
+                          textInputAction: TextInputAction.search,
+                          decoration: InputDecoration(
+                            hintText: 'Search places or addresses',
+                            prefixIcon: const Icon(Icons.search),
+                            suffixIcon: _searchLoading
+                                ? const Padding(
+                                    padding: EdgeInsets.all(14),
+                                    child: SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
                                       ),
-                                    IconButton(
-                                      tooltip: 'Search places',
-                                      icon: const Icon(Icons.search),
-                                      onPressed: _searchPlaces,
                                     ),
-                                  ],
-                                ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                          filled: true,
-                          fillColor: Colors.white,
-                          contentPadding: const EdgeInsets.symmetric(
-                            vertical: 14,
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (_searchError != null ||
-                        _searchResults.isNotEmpty ||
-                        _reverseLoading)
-                      Card(
-                        margin: const EdgeInsets.only(top: 8),
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 280),
-                          child: _reverseLoading
-                              ? const Padding(
-                                  padding: EdgeInsets.all(16),
-                                  child: Row(
+                                  )
+                                : Row(
+                                    mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      SizedBox(
-                                        width: 18,
-                                        height: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
+                                      if (_searchController.text.isNotEmpty)
+                                        IconButton(
+                                          tooltip: 'Clear search',
+                                          icon: const Icon(Icons.clear),
+                                          onPressed: () {
+                                            ++_searchRequestId;
+                                            ++_reverseRequestId;
+                                            ++_mapSelectionRequestId;
+                                            _searchController.clear();
+                                            setState(() {
+                                              _searchResults = const [];
+                                              _searchError = null;
+                                              _selectedPlace = null;
+                                              _reverseLoading = false;
+                                            });
+                                            _removeSearchCircleSafely();
+                                          },
                                         ),
+                                      IconButton(
+                                        tooltip: 'Search places',
+                                        icon: const Icon(Icons.search),
+                                        onPressed: _searchPlaces,
                                       ),
-                                      SizedBox(width: 12),
-                                      Text('Finding address…'),
                                     ],
                                   ),
-                                )
-                              : _searchError != null
-                              ? Padding(
-                                  padding: const EdgeInsets.all(16),
-                                  child: Text(_searchError!),
-                                )
-                              : ListView.separated(
-                                  shrinkWrap: true,
-                                  itemCount: _searchResults.length,
-                                  separatorBuilder: (_, _) =>
-                                      const Divider(height: 1),
-                                  itemBuilder: (context, index) {
-                                    final place = _searchResults[index];
-                                    return ListTile(
-                                      leading: const Icon(Icons.place_outlined),
-                                      title: Text(
-                                        place.displayName,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      subtitle: place.type.isEmpty
-                                          ? null
-                                          : Text(place.type),
-                                      onTap: () => _selectPlace(place),
-                                    );
-                                  },
-                                ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
+                            ),
+                            filled: true,
+                            fillColor: Colors.white,
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 14,
+                            ),
+                          ),
                         ),
                       ),
-                  ],
+                      if (_searchError != null ||
+                          _searchResults.isNotEmpty ||
+                          _reverseLoading)
+                        Card(
+                          margin: const EdgeInsets.only(top: 8),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 280),
+                            child: _reverseLoading
+                                ? const Padding(
+                                    padding: EdgeInsets.all(16),
+                                    child: Row(
+                                      children: [
+                                        SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        ),
+                                        SizedBox(width: 12),
+                                        Text('Finding address…'),
+                                      ],
+                                    ),
+                                  )
+                                : _searchError != null
+                                ? Padding(
+                                    padding: const EdgeInsets.all(16),
+                                    child: Text(_searchError!),
+                                  )
+                                : ListView.separated(
+                                    shrinkWrap: true,
+                                    itemCount: _searchResults.length,
+                                    separatorBuilder: (_, _) =>
+                                        const Divider(height: 1),
+                                    itemBuilder: (context, index) {
+                                      final place = _searchResults[index];
+                                      return ListTile(
+                                        leading: const Icon(
+                                          Icons.place_outlined,
+                                        ),
+                                        title: Text(
+                                          place.displayName,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        subtitle: place.type.isEmpty
+                                            ? null
+                                            : Text(place.type),
+                                        onTap: () => _selectPlace(place),
+                                      );
+                                    },
+                                  ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),

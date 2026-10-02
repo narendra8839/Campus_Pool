@@ -60,3 +60,4 @@ app.*.map.json
 
 # Offline ML artifacts
 backend/ml/model-output/
+backend/ml/data/

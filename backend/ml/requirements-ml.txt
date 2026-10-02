@@ -1,3 +1,5 @@
-# Optional dependency for the neural collaborative filtering trainer.
-# The trainer runs a deterministic popularity baseline without it.
+# Required for DistilBERT fine-tuning and the local sentiment inference API.
 torch>=2.2
+transformers>=4.41,<5
+fastapi>=0.110
+uvicorn[standard]>=0.29

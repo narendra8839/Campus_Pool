@@ -197,9 +197,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     setState(() => _homeMapVisible = false);
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
-    await Navigator.of(context, rootNavigator: true).push<void>(
-      MaterialPageRoute<void>(builder: (_) => screen),
-    );
+    await Navigator.of(
+      context,
+      rootNavigator: true,
+    ).push<void>(MaterialPageRoute<void>(builder: (_) => screen));
     if (mounted) setState(() => _homeMapVisible = true);
   }
 
@@ -323,9 +324,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               styleString: MapConfig.styleUrl,
               initialCameraPosition: MapConfig.initialCameraPosition,
               gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-                Factory<EagerGestureRecognizer>(
-                  () => EagerGestureRecognizer(),
-                ),
+                Factory<EagerGestureRecognizer>(() => EagerGestureRecognizer()),
               },
               onMapCreated: (controller) {
                 _mapController = controller;
@@ -352,65 +351,67 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           maxChildSize: 0.78,
           snap: true,
           snapSizes: const [0.30, 0.78],
-          builder: (context, scrollController) => Container(
-            decoration: const BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-              boxShadow: [
-                BoxShadow(
-                  color: Color(0x22000000),
-                  blurRadius: 16,
-                  offset: Offset(0, -4),
-                ),
-              ],
-            ),
-            child: ListView(
-              controller: scrollController,
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.marginMobile,
-                AppSpacing.sm,
-                AppSpacing.marginMobile,
-                AppSpacing.xl,
+          builder: (context, scrollController) => PointerInterceptor(
+            child: Container(
+              decoration: const BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Color(0x22000000),
+                    blurRadius: 16,
+                    offset: Offset(0, -4),
+                  ),
+                ],
               ),
-              children: [
-                Center(
-                  child: Container(
-                    width: 42,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: AppColors.border,
-                      borderRadius: AppSpacing.radiusFull,
+              child: ListView(
+                controller: scrollController,
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.marginMobile,
+                  AppSpacing.sm,
+                  AppSpacing.marginMobile,
+                  AppSpacing.xl,
+                ),
+                children: [
+                  Center(
+                    child: Container(
+                      width: 42,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.border,
+                        borderRadius: AppSpacing.radiusFull,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  'Available pools near you',
-                  style: AppTypography.headlineSm.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                if (_isLoadingDashboard)
-                  const Padding(
-                    padding: EdgeInsets.all(AppSpacing.lg),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                else if (_nearbyRides.isEmpty)
+                  const SizedBox(height: AppSpacing.md),
                   Text(
-                    'No rides found near VIT College yet.',
-                    style: AppTypography.bodySm.copyWith(
-                      color: AppColors.onSurfaceVariant,
-                    ),
-                  )
-                else
-                  ..._nearbyRides.map(
-                    (ride) => Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                      child: _buildRideCard(ride),
+                    'Available pools near you',
+                    style: AppTypography.headlineSm.copyWith(
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-              ],
+                  const SizedBox(height: AppSpacing.sm),
+                  if (_isLoadingDashboard)
+                    const Padding(
+                      padding: EdgeInsets.all(AppSpacing.lg),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if (_nearbyRides.isEmpty)
+                    Text(
+                      'No rides found near VIT College yet.',
+                      style: AppTypography.bodySm.copyWith(
+                        color: AppColors.onSurfaceVariant,
+                      ),
+                    )
+                  else
+                    ..._nearbyRides.map(
+                      (ride) => Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                        child: _buildRideCard(ride),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ),

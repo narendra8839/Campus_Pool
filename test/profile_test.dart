@@ -119,6 +119,7 @@ void main() {
       expect(find.text('Emergency Contact & Safety'), findsOneWidget);
       expect(find.text('Rajesh Rao'), findsOneWidget);
       expect(find.text('Edit Profile Information'), findsOneWidget);
+      expect(find.text('—'), findsOneWidget);
     });
   });
 }

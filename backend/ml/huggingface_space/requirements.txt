@@ -1,0 +1,5 @@
+transformers>=5.2,<6
+torch>=2.2
+fastapi>=0.110
+gradio>=6.0,<7
+uvicorn[standard]>=0.29

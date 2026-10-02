@@ -1,5 +1,57 @@
 const prisma = require('../config/prisma');
 
+// @desc    Classify review text with the locally hosted fine-tuned model
+// @route   POST /api/reviews/sentiment
+// @access  Private
+const analyzeReviewSentiment = async (req, res) => {
+  const { text } = req.body;
+  if (typeof text !== 'string' || !text.trim() || text.trim().length > 5000) {
+    return res.status(400).json({
+      success: false,
+      message: 'Review text must contain 1 to 5000 characters',
+    });
+  }
+
+  const apiKey = process.env.SENTIMENT_API_KEY;
+  if (!apiKey) {
+    console.error('[Sentiment Service] SENTIMENT_API_KEY is not configured.');
+    return res.status(503).json({
+      success: false,
+      message: 'Sentiment model is unavailable. Ensure service authentication is configured.',
+    });
+  }
+
+  try {
+    const baseUrl = (process.env.SENTIMENT_SERVICE_URL || 'http://127.0.0.1:8001')
+      .replace(/\/+$/, '');
+    const response = await fetch(`${baseUrl}/predict`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Sentiment-Api-Key': apiKey,
+      },
+      body: JSON.stringify({ text: text.trim() }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) {
+      console.error(`[Sentiment Service] Prediction failed with status ${response.status}`);
+      return res.status(503).json({
+        success: false,
+        message: 'Sentiment model is unavailable. Ensure it has been trained and started.',
+      });
+    }
+
+    const prediction = await response.json();
+    res.json({ success: true, data: prediction });
+  } catch (error) {
+    console.error(`[Sentiment Service] ${error.message}`);
+    res.status(503).json({
+      success: false,
+      message: 'Sentiment model is unavailable. Ensure it has been trained and started.',
+    });
+  }
+};
+
 // @desc    Create a review for a driver or passenger
 // @route   POST /api/reviews
 // @access  Private
@@ -158,6 +210,7 @@ const getUserReviews = async (req, res, next) => {
 };
 
 module.exports = {
+  analyzeReviewSentiment,
   createReview,
   getUserReviews,
 };

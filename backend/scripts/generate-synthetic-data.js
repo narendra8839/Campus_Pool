@@ -293,13 +293,124 @@ function generateBookings(random, rides, users) {
 function generateReviews(random, rides, bookings, users) {
   const candidates = [];
   const seen = new Set();
-  const reviewTemplates = [
-    { rating: 1, comment: 'The driver did not arrive at the pickup hub.' },
-    { rating: 2, comment: 'The ride was delayed and communication was difficult.' },
-    { rating: 3, comment: 'The ride was acceptable but could be more punctual.' },
-    { rating: 4, comment: 'Friendly driver and a mostly smooth ride.' },
-    { rating: 5, comment: 'Smooth ride and reached campus on time.' },
-  ];
+  const commentSets = {
+    1: {
+      reviews: [
+        'The driver never arrived at the agreed pickup point.',
+        'The driver cancelled the ride without warning.',
+        'I could not reach the driver when it was time to leave.',
+        'The driver left before I reached the pickup location.',
+        'The pickup details changed without any notice.',
+        'The driver did not show up after confirming the ride.',
+        'I was left waiting with no explanation from the driver.',
+        'The ride did not happen and I received no useful update.',
+        'The driver ignored several messages about the pickup.',
+        'The agreed pickup was missed and no alternative was offered.',
+      ],
+      followUps: [
+        'I was left stranded.',
+        'No one responded when I asked for an update.',
+        'The trip disrupted my plans completely.',
+        'I would not book this ride again.',
+        'This was a very frustrating experience.',
+        'I could not rely on this pickup.',
+      ],
+    },
+    2: {
+      reviews: [
+        'The ride started much later than the agreed time.',
+        'The driver was difficult to contact before pickup.',
+        'The pickup point was confusing and took too long to resolve.',
+        'The driver provided very little information about the delay.',
+        'The vehicle was not comfortable for the trip.',
+        'The route took longer than I expected.',
+        'The driver changed the pickup plan at the last minute.',
+        'The ride was completed, but the coordination was poor.',
+        'I had to wait longer than expected for the driver.',
+        'The trip felt poorly organized from the start.',
+      ],
+      followUps: [
+        'The experience was below what I expected.',
+        'Better communication would have helped.',
+        'The delay made the trip inconvenient.',
+        'I probably would not choose this ride again.',
+        'The trip was more stressful than necessary.',
+        'There was not much effort to keep me informed.',
+      ],
+    },
+    3: {
+      reviews: [
+        'The ride was average overall.',
+        'The trip met the basic expectations.',
+        'The pickup and drop-off were both ordinary.',
+        'The driver and I had a routine trip to campus.',
+        'The ride was acceptable from start to finish.',
+        'The experience was much like a typical commute.',
+        'The trip went as expected without anything notable.',
+        'The ride was neither especially good nor especially bad.',
+        'The service was adequate for this journey.',
+        'The trip was uneventful and straightforward.',
+      ],
+      followUps: [
+        'Nothing in particular stood out.',
+        'The overall experience was simply okay.',
+        'It was a standard ride.',
+        'I have no major feedback about the trip.',
+        'The ride was fine for a regular commute.',
+        'There were no notable surprises.',
+      ],
+    },
+    4: {
+      reviews: [
+        'The driver was friendly and the pickup was well organized.',
+        'The ride was comfortable and the driver was considerate.',
+        'The driver communicated clearly before we set off.',
+        'The trip to campus was smooth and pleasant.',
+        'The driver arrived on time and made the ride easy.',
+        'The vehicle was clean and comfortable for the journey.',
+        'The driver chose a convenient route to campus.',
+        'The pickup went smoothly and the trip was enjoyable.',
+        'The driver was helpful throughout most of the ride.',
+        'I had a good trip and felt comfortable as a passenger.',
+      ],
+      followUps: [
+        'I would be happy to ride with them again.',
+        'Overall, it was a good experience.',
+        'The trip was pleasant from beginning to end.',
+        'I appreciated the clear communication.',
+        'The ride was a good option for my commute.',
+        'I would recommend this ride to other students.',
+      ],
+    },
+    5: {
+      reviews: [
+        'The driver was exceptionally friendly and arrived right on time.',
+        'The ride was excellent and the driver communicated throughout.',
+        'The pickup was effortless and the trip was very comfortable.',
+        'The driver made sure I reached campus safely and promptly.',
+        'Everything about the ride was smooth and well organized.',
+        'The vehicle was spotless and the driver was very considerate.',
+        'The route was efficient and the conversation was welcoming.',
+        'The driver was reliable, courteous, and easy to coordinate with.',
+        'I had a fantastic trip and would gladly book again.',
+        'The ride exceeded my expectations in every way.',
+      ],
+      followUps: [
+        'I would happily travel with this driver again.',
+        'This was one of my best rides to campus.',
+        'I highly recommend this driver.',
+        'The whole experience was excellent.',
+        'I felt safe and well looked after throughout.',
+        'I would give this ride my strongest recommendation.',
+      ],
+    },
+  };
+  const reviewTemplates = Object.entries(commentSets).flatMap(([rating, set]) =>
+    set.reviews.flatMap((review) => set.followUps.map((followUp) => ({
+      rating: Number(rating),
+      comment: `${review} ${followUp}`,
+    }))),
+  );
   for (const booking of bookings) {
     if (!['COMPLETED', 'ACCEPTED'].includes(booking.status)) continue;
     const ride = rides.find((item) => item.id === booking.rideId);
@@ -396,4 +507,8 @@ function main() {
   console.log(JSON.stringify(manifest.counts));
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = { createRandom, generateReviews };

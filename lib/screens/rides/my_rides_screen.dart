@@ -133,7 +133,9 @@ class _MyRidesScreenState extends State<MyRidesScreen>
       final isCompletedOrCancelled =
           b.status == 'COMPLETED' ||
           b.status == 'CANCELLED' ||
-          b.status == 'REJECTED';
+          b.status == 'REJECTED' ||
+          b.ride?.status == 'COMPLETED' ||
+          b.ride?.status == 'CANCELLED';
       if (_selectedFilter == RideFilter.active) {
         return !isCompletedOrCancelled;
       } else if (_selectedFilter == RideFilter.past) {
@@ -424,6 +426,7 @@ class _MyRidesScreenState extends State<MyRidesScreen>
                         return _buildPassengerRequestCard(
                           booking,
                           setSheetState,
+                          rideCompleted: ride.status == 'COMPLETED',
                         );
                       },
                     ),
@@ -438,12 +441,15 @@ class _MyRidesScreenState extends State<MyRidesScreen>
 
   Widget _buildPassengerRequestCard(
     BookingModel booking,
-    StateSetter setSheetState,
-  ) {
+    StateSetter setSheetState, {
+    required bool rideCompleted,
+  }) {
     final passenger = booking.passenger;
     final isPending = booking.status == 'PENDING';
     final isAccepted = booking.status == 'ACCEPTED';
-    final isCompleted = booking.status == 'COMPLETED';
+    final isCompleted =
+        booking.status == 'COMPLETED' ||
+        (booking.status == 'ACCEPTED' && rideCompleted);
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -904,7 +910,7 @@ class _MyRidesScreenState extends State<MyRidesScreen>
         .where((b) => b.status == 'PENDING')
         .length;
     final acceptedCount = ride.bookings
-        .where((b) => b.status == 'ACCEPTED')
+        .where((b) => b.status == 'ACCEPTED' || b.status == 'COMPLETED')
         .length;
     final isScheduled = ride.status == 'SCHEDULED';
     final isOngoing = ride.status == 'ONGOING';
@@ -1077,6 +1083,20 @@ class _MyRidesScreenState extends State<MyRidesScreen>
             ),
           ),
 
+          if (ride.status == 'COMPLETED' && acceptedCount > 0) ...[
+            const SizedBox(height: AppSpacing.md),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.star_outline_rounded),
+                onPressed: () => _showPassengerRequestsSheet(ride),
+                label: Text(
+                  'Rate ${acceptedCount == 1 ? 'passenger' : 'passengers'}',
+                ),
+              ),
+            ),
+          ],
+
           // Driver Status Controls
           if (!isTerminal) ...[
             const SizedBox(height: AppSpacing.md),
@@ -1224,7 +1244,9 @@ class _MyRidesScreenState extends State<MyRidesScreen>
     final driver = ride?.driver;
     final isAccepted = booking.status == 'ACCEPTED';
     final isPending = booking.status == 'PENDING';
-    final isCompleted = booking.status == 'COMPLETED';
+    final isCompleted =
+        booking.status == 'COMPLETED' ||
+        (booking.status == 'ACCEPTED' && ride?.status == 'COMPLETED');
 
     return AppCard(
       padding: const EdgeInsets.all(AppSpacing.md),

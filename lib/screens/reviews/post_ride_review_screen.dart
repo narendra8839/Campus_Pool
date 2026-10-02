@@ -19,9 +19,50 @@ class _PostRideReviewScreenState extends State<PostRideReviewScreen> {
   final _comment = TextEditingController();
   int _rating = 5;
   bool _submitting = false;
+  bool _analyzing = false;
+  String? _sentiment;
+  String? _analysisError;
+  int _analysisRequestId = 0;
 
   @override
   void dispose() { _comment.dispose(); super.dispose(); }
+
+  void _onCommentChanged(String _) {
+    setState(() {
+      if (_sentiment != null || _analysisError != null || _analyzing) {
+        _analysisRequestId++;
+        _analyzing = false;
+        _sentiment = null;
+        _analysisError = null;
+      }
+    });
+  }
+
+  Future<void> _analyzeComment() async {
+    final text = _comment.text.trim();
+    if (_analyzing || text.isEmpty || text.length > 5000) return;
+    final requestId = ++_analysisRequestId;
+    setState(() {
+      _analyzing = true;
+      _sentiment = null;
+      _analysisError = null;
+    });
+    try {
+      final result = await ReviewService.analyzeSentiment(text);
+      if (!mounted || requestId != _analysisRequestId) return;
+      setState(() {
+        _sentiment = result.label;
+        _analyzing = false;
+      });
+    } catch (error) {
+      if (!mounted || requestId != _analysisRequestId) return;
+      debugPrint('Could not analyze review sentiment: $error');
+      setState(() {
+        _analysisError = 'Could not analyze this comment. You can still submit your review.';
+        _analyzing = false;
+      });
+    }
+  }
 
   Future<void> _submit() async {
     if (_submitting) return;
@@ -55,7 +96,60 @@ class _PostRideReviewScreenState extends State<PostRideReviewScreen> {
           const SizedBox(height: AppSpacing.sm),
           Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(5, (i) => IconButton(tooltip: '${i + 1} stars', onPressed: () => setState(() => _rating = i + 1), iconSize: 42, icon: Icon(i < _rating ? Icons.star_rounded : Icons.star_outline_rounded, color: AppColors.tertiaryLight)))),
           const SizedBox(height: AppSpacing.md),
-          AppTextField(controller: _comment, label: 'Feedback (optional)', hintText: 'Tell us what went well or could improve', maxLines: 4),
+          AppTextField(
+            controller: _comment,
+            label: 'Feedback (optional)',
+            hintText: 'Tell us what went well or could improve',
+            maxLines: 4,
+            onChanged: _onCommentChanged,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: AppSecondaryButton(
+              text: 'Analyze review',
+              icon: Icons.auto_awesome_outlined,
+              fullWidth: false,
+              isLoading: _analyzing,
+              onPressed: _comment.text.trim().isEmpty ||
+                      _comment.text.trim().length > 5000 ||
+                      _submitting
+                  ? null
+                  : _analyzeComment,
+            ),
+          ),
+          if (_comment.text.trim().length > 5000) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Keep the comment under 5000 characters to analyze it.',
+                style: AppTypography.caption.copyWith(color: AppColors.error),
+              ),
+            ),
+          ],
+          if (_sentiment != null) ...[
+            const SizedBox(height: AppSpacing.md),
+            _SentimentResult(label: _sentiment!),
+          ],
+          if (_analysisError != null) ...[
+            const SizedBox(height: AppSpacing.md),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                _analysisError!,
+                style: AppTypography.bodySm.copyWith(color: AppColors.error),
+              ),
+            ),
+          ],
+          const SizedBox(height: AppSpacing.xs),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Optional tone suggestion based on your comment. It does not affect your rating or review.',
+              style: AppTypography.caption.copyWith(color: AppColors.onSurfaceVariant),
+            ),
+          ),
         ])),
         const SizedBox(height: AppSpacing.xl),
         AppPrimaryButton(text: 'Submit review', icon: Icons.send_rounded, isLoading: _submitting, onPressed: _submit),
@@ -63,4 +157,41 @@ class _PostRideReviewScreenState extends State<PostRideReviewScreen> {
       ]),
     )),
   );
+}
+
+class _SentimentResult extends StatelessWidget {
+  const _SentimentResult({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, color) = switch (label) {
+      'positive' => (Icons.sentiment_satisfied_alt_rounded, AppColors.secondary),
+      'negative' => (Icons.sentiment_dissatisfied_rounded, AppColors.error),
+      _ => (Icons.sentiment_neutral_rounded, AppColors.tertiary),
+    };
+    final title = '${label[0].toUpperCase()}${label.substring(1)} tone';
+
+    return Container(
+      width: double.infinity,
+      padding: AppSpacing.paddingMd,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: AppSpacing.radiusMd,
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              title,
+              style: AppTypography.labelMd.copyWith(color: color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

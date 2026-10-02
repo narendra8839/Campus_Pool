@@ -225,7 +225,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final isDriver =
         user?.roles.contains('driver') == true ||
         user?.roles.contains('both') == true;
-    final rating = user?.ratingAvg ?? 4.9;
+    final rating = user?.ratingCount == 0
+        ? '—'
+        : (user?.ratingAvg ?? 5.0).toStringAsFixed(1);
     final vehicle = user?.vehicle;
 
     return [
@@ -329,7 +331,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 _buildStatItem(
                   icon: Icons.star_rounded,
                   iconColor: AppColors.tertiary,
-                  value: rating.toStringAsFixed(1),
+                  value: rating,
                   label: 'Rating',
                 ),
                 Container(width: 1, height: 32, color: AppColors.border),

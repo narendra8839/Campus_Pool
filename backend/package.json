@@ -18,7 +18,10 @@
     "recalculate:fares": "node scripts/recalculate-fares.js",
     "generate:synthetic": "node scripts/generate-synthetic-data.js",
     "import:synthetic": "node scripts/import-synthetic-data.js",
+    "export:reviews:sentiment": "node scripts/export-reviews-for-sentiment.js",
     "train:ncf": "python ml/train_ncf.py",
+    "train:sentiment": "python ml/train_sentiment.py",
+    "serve:sentiment": "python -m uvicorn sentiment_service:app --app-dir ml --host 127.0.0.1 --port 8001",
     "db:test": "node test_db.js"
   },
   "keywords": [
