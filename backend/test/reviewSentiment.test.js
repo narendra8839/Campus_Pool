@@ -43,14 +43,20 @@ test('forwards valid text and returns the model prediction', async () => {
   const originalFetch = global.fetch;
   const originalUrl = process.env.SENTIMENT_SERVICE_URL;
   const originalApiKey = process.env.SENTIMENT_API_KEY;
-  let request;
+  const requests = [];
   process.env.SENTIMENT_SERVICE_URL = 'http://sentiment.test/';
   process.env.SENTIMENT_API_KEY = 'test-sentiment-secret';
   global.fetch = async (url, options) => {
-    request = { url, options };
+    requests.push({ url, options });
+    if (requests.length === 1) {
+      return {
+        ok: true,
+        json: async () => ({ event_id: 'event-123' }),
+      };
+    }
     return {
       ok: true,
-      json: async () => ({ sentiment: 'positive', confidence: 0.96 }),
+      text: async () => 'event: complete\ndata: [{"sentiment":"positive","confidence":0.96}]\n\n',
     };
   };
 
@@ -64,11 +70,44 @@ test('forwards valid text and returns the model prediction', async () => {
     else process.env.SENTIMENT_API_KEY = originalApiKey;
   }
 
-  assert.equal(request.url, 'http://sentiment.test/predict');
-  assert.equal(request.options.headers['X-Sentiment-Api-Key'], 'test-sentiment-secret');
-  assert.deepEqual(JSON.parse(request.options.body), { text: 'Smooth ride' });
+  assert.equal(requests[0].url, 'http://sentiment.test/gradio_api/call/predict');
+  assert.deepEqual(JSON.parse(requests[0].options.body), {
+    data: ['Smooth ride', 'test-sentiment-secret'],
+  });
+  assert.equal(
+    requests[1].url,
+    'http://sentiment.test/gradio_api/call/predict/event-123',
+  );
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.body.data, { sentiment: 'positive', confidence: 0.96 });
+});
+
+test('reports failed Gradio prediction events as unavailable', async () => {
+  const response = mockResponse();
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.SENTIMENT_API_KEY;
+  const originalConsoleError = console.error;
+  process.env.SENTIMENT_API_KEY = 'test-sentiment-secret';
+  console.error = () => {};
+  let requestCount = 0;
+  global.fetch = async () => {
+    requestCount += 1;
+    return requestCount === 1
+      ? { ok: true, json: async () => ({ event_id: 'event-123' }) }
+      : { ok: true, text: async () => 'event: error\ndata: "Model failed"\n\n' };
+  };
+
+  try {
+    await analyzeReviewSentiment({ body: { text: 'Nice driver' } }, response);
+  } finally {
+    global.fetch = originalFetch;
+    console.error = originalConsoleError;
+    if (originalApiKey === undefined) delete process.env.SENTIMENT_API_KEY;
+    else process.env.SENTIMENT_API_KEY = originalApiKey;
+  }
+
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.body.success, false);
 });
 
 test('reports the model as unavailable when inference fails', async () => {

@@ -1,6 +1,36 @@
 const prisma = require('../config/prisma');
 
-// @desc    Classify review text with the locally hosted fine-tuned model
+const parseGradioPrediction = (eventStream) => {
+  const events = [...eventStream.matchAll(
+    /(?:^|\r?\n)event:\s*(\w+)\r?\ndata:\s*(.+)/g,
+  )];
+  const errorEvent = events.find(([, eventName]) => eventName === 'error');
+  if (errorEvent) {
+    throw new Error('Gradio inference request failed.');
+  }
+
+  const completeEvent = events.find(([, eventName]) => eventName === 'complete');
+  if (!completeEvent) {
+    throw new Error('Gradio inference returned no completion event.');
+  }
+
+  const outputs = JSON.parse(completeEvent[2]);
+  const prediction = Array.isArray(outputs) ? outputs[0] : null;
+  if (
+    !prediction ||
+    typeof prediction !== 'object' ||
+    !['negative', 'neutral', 'positive'].includes(prediction.sentiment) ||
+    typeof prediction.confidence !== 'number' ||
+    !Number.isFinite(prediction.confidence) ||
+    prediction.confidence < 0 ||
+    prediction.confidence > 1
+  ) {
+    throw new Error('Gradio inference returned an invalid prediction.');
+  }
+  return prediction;
+};
+
+// @desc    Classify review text with the fine-tuned model on Hugging Face
 // @route   POST /api/reviews/sentiment
 // @access  Private
 const analyzeReviewSentiment = async (req, res) => {
@@ -24,24 +54,42 @@ const analyzeReviewSentiment = async (req, res) => {
   try {
     const baseUrl = (process.env.SENTIMENT_SERVICE_URL || 'http://127.0.0.1:8001')
       .replace(/\/+$/, '');
-    const response = await fetch(`${baseUrl}/predict`, {
+    const submissionResponse = await fetch(`${baseUrl}/gradio_api/call/predict`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Sentiment-Api-Key': apiKey,
-      },
-      body: JSON.stringify({ text: text.trim() }),
-      signal: AbortSignal.timeout(5000),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: [text.trim(), apiKey] }),
+      signal: AbortSignal.timeout(8000),
     });
-    if (!response.ok) {
-      console.error(`[Sentiment Service] Prediction failed with status ${response.status}`);
+    if (!submissionResponse.ok) {
+      console.error(
+        `[Sentiment Service] Gradio request failed with status ${submissionResponse.status}`,
+      );
       return res.status(503).json({
         success: false,
         message: 'Sentiment model is unavailable. Ensure it has been trained and started.',
       });
     }
 
-    const prediction = await response.json();
+    const submission = await submissionResponse.json();
+    if (typeof submission.event_id !== 'string' || !submission.event_id) {
+      throw new Error('Gradio did not return a prediction event ID.');
+    }
+
+    const resultResponse = await fetch(
+      `${baseUrl}/gradio_api/call/predict/${encodeURIComponent(submission.event_id)}`,
+      { signal: AbortSignal.timeout(8000) },
+    );
+    if (!resultResponse.ok) {
+      console.error(
+        `[Sentiment Service] Gradio result failed with status ${resultResponse.status}`,
+      );
+      return res.status(503).json({
+        success: false,
+        message: 'Sentiment model is unavailable. Ensure it has been trained and started.',
+      });
+    }
+
+    const prediction = parseGradioPrediction(await resultResponse.text());
     res.json({ success: true, data: prediction });
   } catch (error) {
     console.error(`[Sentiment Service] ${error.message}`);

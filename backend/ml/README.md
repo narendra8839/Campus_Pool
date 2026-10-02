@@ -72,9 +72,10 @@ Python inference service must be restarted after replacing the model.
 The included Gradio Space is in `ml/huggingface_space/`. Create a new Space with
 the Gradio SDK, then upload these files from that folder to the Space repository
 root: `README.md`, `requirements.txt`, and `app.py`. Docker is not required.
-Hugging Face Spaces installs Gradio 6.29 and Hugging Face Hub 1.x; the Space
-requirements therefore use Transformers 5.2+, because Transformers 4 requires
-Hugging Face Hub below 1.0 and conflicts with Gradio 6.
+On a free account, select the **ZeroGPU** hardware; CPU Basic requires PRO for
+this Space. The Space requirements use Transformers 5.2+, compatible with the
+Gradio 6 / Hugging Face Hub 1.x runtime. ZeroGPU inference uses the
+`@spaces.GPU` decorator and loads the model onto CUDA at startup.
 
 In the Space settings, add these secrets:
 
@@ -87,10 +88,11 @@ Add this Space variable:
 
 - `HF_MODEL_ID=Naren88/Sentiment_Service`
 
-The Space downloads the private model when it starts and listens on port 7860.
-Wait for the build and startup to finish, then check
-`https://<space-name>.hf.space/health`; it should return `{"status":"ok"}`.
-The `/predict` endpoint requires the `X-Sentiment-Api-Key` header.
+The Space downloads the private model when it starts. Wait for the build and
+startup to finish, then open `https://<space-name>.hf.space/`; the Gradio page
+should load. The named `predict` endpoint requires the shared key as its second
+input. The Vercel backend calls Gradio's `/gradio_api/call/predict` endpoint and
+waits for its completion event; do not configure a separate `/predict` route.
 
 In Vercel's backend project settings, set:
 
@@ -98,9 +100,9 @@ In Vercel's backend project settings, set:
 - `SENTIMENT_API_KEY` to the same shared secret configured in the Space.
 
 Redeploy the backend after changing its environment variables. Test review
-analysis in the app; if the Space has been idle, allow for its startup delay.
-The unauthenticated health endpoint does not expose the private model ID or
-prediction access.
+analysis in the app; if the Space has been idle, open the Space once and wait
+for it to wake before testing. The Space requires the shared key for every
+prediction and does not expose it in the app UI.
 
 ## Existing ride recommendation model
 
