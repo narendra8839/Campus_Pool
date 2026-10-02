@@ -70,9 +70,13 @@ test('forwards valid text and returns the model prediction', async () => {
     else process.env.SENTIMENT_API_KEY = originalApiKey;
   }
 
-  assert.equal(requests[0].url, 'http://sentiment.test/gradio_api/call/predict');
+  assert.equal(
+    requests[0].url,
+    'http://sentiment.test/gradio_api/call/v2/predict',
+  );
   assert.deepEqual(JSON.parse(requests[0].options.body), {
-    data: ['Smooth ride', 'test-sentiment-secret'],
+    text: 'Smooth ride',
+    api_key: 'test-sentiment-secret',
   });
   assert.equal(
     requests[1].url,

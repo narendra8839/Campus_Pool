@@ -54,12 +54,15 @@ const analyzeReviewSentiment = async (req, res) => {
   try {
     const baseUrl = (process.env.SENTIMENT_SERVICE_URL || 'http://127.0.0.1:8001')
       .replace(/\/+$/, '');
-    const submissionResponse = await fetch(`${baseUrl}/gradio_api/call/predict`, {
+    const submissionResponse = await fetch(
+      `${baseUrl}/gradio_api/call/v2/predict`,
+      {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: [text.trim(), apiKey] }),
+      body: JSON.stringify({ text: text.trim(), api_key: apiKey }),
       signal: AbortSignal.timeout(8000),
-    });
+      },
+    );
     if (!submissionResponse.ok) {
       console.error(
         `[Sentiment Service] Gradio request failed with status ${submissionResponse.status}`,
