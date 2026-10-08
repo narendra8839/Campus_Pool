@@ -351,6 +351,14 @@ class _FindRidesScreenState extends State<FindRidesScreen> {
         elevation: 0,
         actions: [
           IconButton(
+            icon: const Icon(Icons.groups_rounded),
+            tooltip: 'Auto Groups',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AutoGroupsScreen()),
+            ),
+          ),
+          IconButton(
             icon: const Icon(Icons.tune_rounded),
             tooltip: 'Sort & Options',
             onPressed: _showSortFilterModal,

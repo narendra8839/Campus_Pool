@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../models/corridor_model.dart';
 import '../../services/api_service.dart';
+import '../../services/route_service.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_spacing.dart';
 import '../../theme/app_typography.dart';
@@ -36,14 +38,20 @@ class _AutoGroupsScreenState extends State<AutoGroupsScreen> {
     }
   }
 
-  Future<void> _createRequest(String pickup, String destination, DateTime time) async {
+  Future<void> _createRequest(
+    CorridorModel corridor,
+    HubModel pickup,
+    HubModel destination,
+    DateTime time,
+  ) async {
     try {
       final response = await ApiService.post(
         '/auto-groups/requests',
         requiresAuth: true,
         body: {
-          'pickupName': pickup,
-          'destinationName': destination,
+          'corridorId': corridor.id,
+          'pickupHubId': pickup.id,
+          'destinationHubId': destination.id,
           'desiredDepartureTime': time.toUtc().toIso8601String(),
         },
       );
@@ -78,61 +86,10 @@ class _AutoGroupsScreenState extends State<AutoGroupsScreen> {
   }
 
   void _showCreateRequestSheet() {
-    final formKey = GlobalKey<FormState>();
-    final pickup = TextEditingController();
-    final destination = TextEditingController();
-    DateTime selectedTime = DateTime.now().add(const Duration(minutes: 30));
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (context, setSheetState) => Padding(
-          padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 24),
-          child: Form(
-            key: formKey,
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Find an auto group', style: AppTypography.headlineSm.copyWith(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 8),
-              Text('We only coordinate students with similar routes. Fare is decided with the auto driver.', style: AppTypography.bodySm.copyWith(color: AppColors.onSurfaceVariant)),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: pickup,
-                decoration: const InputDecoration(labelText: 'Pickup area', hintText: 'e.g. Viman Nagar'),
-                validator: (value) => value == null || value.trim().isEmpty ? 'Enter your pickup area' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: destination,
-                decoration: const InputDecoration(labelText: 'Destination', hintText: 'e.g. College Main Gate'),
-                validator: (value) => value == null || value.trim().isEmpty ? 'Enter your destination' : null,
-              ),
-              const SizedBox(height: 12),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.schedule_rounded, color: AppColors.primary),
-                title: const Text('Desired departure'),
-                subtitle: Text('${MaterialLocalizations.of(context).formatFullDate(selectedTime)}  ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(selectedTime))}'),
-                onTap: () async {
-                  final date = await showDatePicker(context: context, firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 30)), initialDate: selectedTime);
-                  if (date == null || !context.mounted) return;
-                  final time = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(selectedTime));
-                  if (time != null) setSheetState(() => selectedTime = DateTime(date.year, date.month, date.day, time.hour, time.minute));
-                },
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () { if (formKey.currentState!.validate()) _createRequest(pickup.text.trim(), destination.text.trim(), selectedTime); },
-                  icon: const Icon(Icons.group_add_rounded),
-                  label: const Text('Create request'),
-                ),
-              ),
-            ]),
-          ),
-        ),
-      ),
+      builder: (_) => _CreateAutoRequestSheet(onSubmit: _createRequest),
     );
   }
 
@@ -178,6 +135,13 @@ class _AutoGroupCard extends StatelessWidget {
     final status = group['status']?.toString() ?? 'FORMING';
     final time = DateTime.tryParse(group['departureTime']?.toString() ?? '')?.toLocal();
     final isReady = status == 'READY' || status == 'CONFIRMED';
+    final corridor = group['corridor'] as Map<String, dynamic>?;
+    final memberTrips = members.map((member) {
+      final request = (member as Map<String, dynamic>)['request']
+          as Map<String, dynamic>?;
+      if (request == null) return null;
+      return '${request['pickupName']} → ${request['destinationName']}';
+    }).whereType<String>().join(' • ');
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -185,11 +149,14 @@ class _AutoGroupCard extends StatelessWidget {
           Row(children: [
             const Icon(Icons.local_taxi_rounded, color: AppColors.primary),
             const SizedBox(width: 8),
-            Expanded(child: Text('${group['pickupName']} → ${group['destinationName']}', style: AppTypography.labelMd.copyWith(fontWeight: FontWeight.w700))),
+            Expanded(child: Text(corridor?['name']?.toString() ?? 'Auto route group', style: AppTypography.labelMd.copyWith(fontWeight: FontWeight.w700))),
             Chip(label: Text(status)),
           ]),
           const SizedBox(height: 8),
           Text('${members.length}/${group['maxMembers']} students • ${time == null ? 'Time not available' : MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(time))}'),
+          const SizedBox(height: 8),
+          if (memberTrips.isNotEmpty)
+            Text('Trips: $memberTrips', style: AppTypography.bodySm.copyWith(color: AppColors.onSurfaceVariant)),
           const SizedBox(height: 8),
           Text(members.map((member) => member['user']?['name']?.toString() ?? 'Student').join(', '), style: AppTypography.bodySm.copyWith(color: AppColors.onSurfaceVariant)),
           const Divider(height: 24),
@@ -201,6 +168,247 @@ class _AutoGroupCard extends StatelessWidget {
             TextButton(onPressed: onLeave, child: const Text('Leave group')),
           ]),
         ]),
+      ),
+    );
+  }
+}
+
+class _CreateAutoRequestSheet extends StatefulWidget {
+  const _CreateAutoRequestSheet({required this.onSubmit});
+
+  final Future<void> Function(
+    CorridorModel corridor,
+    HubModel pickup,
+    HubModel destination,
+    DateTime time,
+  ) onSubmit;
+
+  @override
+  State<_CreateAutoRequestSheet> createState() => _CreateAutoRequestSheetState();
+}
+
+class _CreateAutoRequestSheetState extends State<_CreateAutoRequestSheet> {
+  List<CorridorModel> _corridors = [];
+  CorridorModel? _selectedCorridor;
+  HubModel? _selectedPickup;
+  HubModel? _selectedDestination;
+  DateTime _selectedTime = DateTime.now().add(const Duration(minutes: 30));
+  bool _isLoading = true;
+  bool _isSubmitting = false;
+  String? _loadError;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCorridors();
+  }
+
+  Future<void> _loadCorridors() async {
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+    });
+    try {
+      final corridors = (await RouteService.listCorridors())
+          .where((corridor) => corridor.hubs.length >= 2)
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _corridors = corridors;
+        _selectedCorridor = corridors.isEmpty ? null : corridors.first;
+        _selectedPickup = _selectedCorridor?.hubs.first;
+        _selectedDestination = _selectedCorridor?.hubs.length == 1
+            ? null
+            : _selectedCorridor?.hubs[1];
+      });
+    } catch (error) {
+      if (mounted) setState(() => _loadError = error.toString());
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _chooseDepartureTime() async {
+    final date = await showDatePicker(
+      context: context,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 30)),
+      initialDate: _selectedTime,
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_selectedTime),
+    );
+    if (time != null) {
+      setState(() {
+        _selectedTime = DateTime(
+          date.year,
+          date.month,
+          date.day,
+          time.hour,
+          time.minute,
+        );
+      });
+    }
+  }
+
+  Future<void> _submit() async {
+    final corridor = _selectedCorridor;
+    final pickup = _selectedPickup;
+    final destination = _selectedDestination;
+    if (corridor == null || pickup == null || destination == null) return;
+
+    setState(() => _isSubmitting = true);
+    await widget.onSubmit(corridor, pickup, destination, _selectedTime);
+    if (mounted) setState(() => _isSubmitting = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final corridor = _selectedCorridor;
+    final pickup = _selectedPickup;
+    final destination = _selectedDestination;
+    final availableDestinations = corridor?.hubs
+        .where((hub) => hub.id != pickup?.id)
+        .toList() ?? const <HubModel>[];
+
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          20,
+          20,
+          MediaQuery.of(context).viewInsets.bottom + 24,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Find an auto group',
+              style: AppTypography.headlineSm.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Choose a corridor and two stops. Students can get off at different stops, as long as everyone shares part of the same route.',
+              style: AppTypography.bodySm.copyWith(
+                color: AppColors.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (_isLoading)
+              const Center(child: CircularProgressIndicator())
+            else if (_loadError != null)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_loadError!, style: TextStyle(color: AppColors.error)),
+                  TextButton(
+                    onPressed: _loadCorridors,
+                    child: const Text('Try again'),
+                  ),
+                ],
+              )
+            else if (_corridors.isEmpty)
+              const Text('No routes with stops are available yet.')
+            else ...[
+              DropdownButtonFormField<String>(
+                value: corridor?.id,
+                decoration: const InputDecoration(labelText: 'Route'),
+                items: _corridors
+                    .map(
+                      (item) => DropdownMenuItem(
+                        value: item.id,
+                        child: Text(item.name),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (id) {
+                  final selected = _corridors.firstWhere(
+                    (item) => item.id == id,
+                  );
+                  setState(() {
+                    _selectedCorridor = selected;
+                    _selectedPickup = selected.hubs.first;
+                    _selectedDestination = selected.hubs[1];
+                  });
+                },
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: pickup?.id,
+                decoration: const InputDecoration(labelText: 'Pickup stop'),
+                items: corridor!.hubs
+                    .map(
+                      (hub) => DropdownMenuItem(
+                        value: hub.id,
+                        child: Text(hub.name),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (id) {
+                  final selected = corridor.hubs.firstWhere(
+                    (hub) => hub.id == id,
+                  );
+                  setState(() {
+                    _selectedPickup = selected;
+                    if (_selectedDestination?.id == selected.id) {
+                      _selectedDestination = corridor.hubs.firstWhere(
+                        (hub) => hub.id != selected.id,
+                      );
+                    }
+                  });
+                },
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: destination?.id,
+                decoration: const InputDecoration(labelText: 'Drop-off stop'),
+                items: availableDestinations
+                    .map(
+                      (hub) => DropdownMenuItem(
+                        value: hub.id,
+                        child: Text(hub.name),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (id) => setState(
+                  () => _selectedDestination = corridor.hubs.firstWhere(
+                    (hub) => hub.id == id,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(
+                  Icons.schedule_rounded,
+                  color: AppColors.primary,
+                ),
+                title: const Text('Desired departure'),
+                subtitle: Text(
+                  '${MaterialLocalizations.of(context).formatFullDate(_selectedTime)}  '
+                  '${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(_selectedTime))}',
+                ),
+                onTap: _chooseDepartureTime,
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _isSubmitting ? null : _submit,
+                  icon: const Icon(Icons.group_add_rounded),
+                  label: Text(
+                    _isSubmitting ? 'Creating request...' : 'Create request',
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

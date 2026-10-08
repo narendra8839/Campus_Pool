@@ -24,7 +24,7 @@ class ApiService {
 
   /// Candidate base URLs in order of preference
   static List<String> get _candidateBaseUrls {
-    final envVar = String.fromEnvironment('API_BASE_URL', defaultValue: '');
+    const envVar = String.fromEnvironment('API_BASE_URL', defaultValue: '');
     final List<String> urls = <String>[];
     if (envVar.isNotEmpty) {
       urls.add(envVar);

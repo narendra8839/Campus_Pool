@@ -1,4 +1,5 @@
 const prisma = require('../config/prisma');
+const { hasSharedRouteSegment } = require('../utils/autoGroupMatching');
 
 const MATCH_WINDOW_MINUTES = 15;
 const READY_MEMBER_COUNT = 3;
@@ -6,23 +7,39 @@ const READY_MEMBER_COUNT = 3;
 const normalisePlace = (value) => value.trim().replace(/\s+/g, ' ').toLowerCase();
 
 const includeMembers = {
-  members: {
-    where: { status: { not: 'LEFT' } },
-    include: {
-      user: { select: { id: true, name: true, phone: true, avatar: true, rollNumber: true } },
-      request: { select: { pickupName: true, destinationName: true, desiredDepartureTime: true } },
+  include: {
+    corridor: { select: { id: true, name: true } },
+    members: {
+      where: { status: { not: 'LEFT' } },
+      include: {
+        user: { select: { id: true, name: true, phone: true, avatar: true, rollNumber: true } },
+        request: {
+          select: {
+            pickupName: true,
+            destinationName: true,
+            desiredDepartureTime: true,
+            pickupHubId: true,
+            destinationHubId: true,
+          },
+        },
+      },
+      orderBy: { joinedAt: 'asc' },
     },
-    orderBy: { joinedAt: 'asc' },
   },
 };
 
 // POST /api/auto-groups/requests
-// Uses deliberately simple V1 matching: exact normalised pickup/destination and +/- 15 minutes.
+// Match students on the same directed corridor with an overlapping route segment.
 const createAutoRequest = async (req, res, next) => {
   try {
-    const { pickupName, destinationName, desiredDepartureTime } = req.body;
-    if (!pickupName?.trim() || !destinationName?.trim() || !desiredDepartureTime) {
-      return res.status(400).json({ success: false, message: 'pickupName, destinationName, and desiredDepartureTime are required' });
+    const { corridorId, pickupHubId, destinationHubId, desiredDepartureTime } = req.body;
+    if (
+      typeof corridorId !== 'string' ||
+      typeof pickupHubId !== 'string' ||
+      typeof destinationHubId !== 'string' ||
+      !desiredDepartureTime
+    ) {
+      return res.status(400).json({ success: false, message: 'corridorId, pickupHubId, destinationHubId, and desiredDepartureTime are required' });
     }
 
     const departureTime = new Date(desiredDepartureTime);
@@ -30,12 +47,43 @@ const createAutoRequest = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Desired departure time must be a future date and time' });
     }
 
-    const normalizedPickupName = normalisePlace(pickupName);
-    const normalizedDestinationName = normalisePlace(destinationName);
     const windowStart = new Date(departureTime.getTime() - MATCH_WINDOW_MINUTES * 60 * 1000);
     const windowEnd = new Date(departureTime.getTime() + MATCH_WINDOW_MINUTES * 60 * 1000);
 
     const result = await prisma.$transaction(async (tx) => {
+      const corridor = await tx.corridor.findUnique({
+        where: { id: corridorId },
+        include: {
+          hubs: {
+            orderBy: { sequence: 'asc' },
+            include: { hub: { select: { id: true, name: true } } },
+          },
+        },
+      });
+      if (!corridor) {
+        const error = new Error('Selected route was not found.');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      const sequenceByHubId = new Map(
+        corridor.hubs.map(({ hub, sequence }) => [hub.id, sequence]),
+      );
+      if (
+        !sequenceByHubId.has(pickupHubId) ||
+        !sequenceByHubId.has(destinationHubId) ||
+        sequenceByHubId.get(pickupHubId) === sequenceByHubId.get(destinationHubId)
+      ) {
+        const error = new Error('Choose two different stops on the selected route.');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const pickupName = corridor.hubs.find(({ hub }) => hub.id === pickupHubId).hub.name;
+      const destinationName = corridor.hubs.find(({ hub }) => hub.id === destinationHubId).hub.name;
+      const normalizedPickupName = normalisePlace(pickupName);
+      const normalizedDestinationName = normalisePlace(destinationName);
+
       const activeRequest = await tx.autoRequest.findFirst({
         where: { userId: req.user.id, status: { in: ['OPEN', 'MATCHED'] } },
       });
@@ -46,23 +94,49 @@ const createAutoRequest = async (req, res, next) => {
       }
 
       const request = await tx.autoRequest.create({
-        data: { userId: req.user.id, pickupName: pickupName.trim(), normalizedPickupName, destinationName: destinationName.trim(), normalizedDestinationName, desiredDepartureTime: departureTime },
+        data: {
+          userId: req.user.id,
+          corridorId,
+          pickupHubId,
+          destinationHubId,
+          pickupName,
+          normalizedPickupName,
+          destinationName,
+          normalizedDestinationName,
+          desiredDepartureTime: departureTime,
+        },
       });
 
       const candidates = await tx.autoGroup.findMany({
         where: {
           status: { in: ['FORMING', 'READY'] },
-          normalizedPickupName,
-          normalizedDestinationName,
+          corridorId,
           departureTime: { gte: windowStart, lte: windowEnd },
         },
         ...includeMembers,
         orderBy: { createdAt: 'asc' },
       });
-      const group = candidates.find((candidate) => candidate.members.length < candidate.maxMembers);
+      const group = candidates.find((candidate) =>
+        candidate.members.length < candidate.maxMembers &&
+        hasSharedRouteSegment(
+          [
+            ...candidate.members.map((member) => member.request),
+            { pickupHubId, destinationHubId },
+          ],
+          sequenceByHubId,
+        ),
+      );
 
       const targetGroup = group || await tx.autoGroup.create({
-        data: { pickupName: pickupName.trim(), normalizedPickupName, destinationName: destinationName.trim(), normalizedDestinationName, departureTime, maxMembers: 4 },
+        data: {
+          corridorId,
+          pickupName,
+          normalizedPickupName,
+          destinationName,
+          normalizedDestinationName,
+          departureTime,
+          maxMembers: 4,
+        },
         ...includeMembers,
       });
 

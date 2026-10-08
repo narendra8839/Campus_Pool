@@ -1,18 +1,22 @@
 // ignore_for_file: unused_element
 
+import 'dart:async';
+import 'dart:math' show Point;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 import '../../components/components.dart';
-import '../../models/booking_model.dart';
+import '../../models/corridor_model.dart';
 import '../../models/ride_model.dart';
+import '../../services/geocoding_service.dart';
+import '../../services/routing_service.dart';
+import '../../services/route_service.dart';
 import '../../services/route_preview_store.dart';
 import '../../models/geocoding_result.dart';
 import '../../models/route_result.dart';
 import '../../services/auth_service.dart';
-import '../../services/booking_service.dart';
 import '../../services/ride_service.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_spacing.dart';
@@ -30,6 +34,7 @@ import '../map/map_screen.dart';
 import '../map/map_config.dart';
 import '../../utils/runtime_environment.dart';
 import '../../utils/ride_fare.dart';
+import '../auto_groups/auto_groups_screen.dart';
 
 /// Campus Pool Home Dashboard Screen
 /// Based on Stitch design: projects/4131098890607133930/screens/f3c45ada102f44db80a425cc7c5598b1
@@ -49,7 +54,6 @@ class HomeDashboardScreen extends StatefulWidget {
 
 class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   int _currentNavIndex = 0;
-  RideModel? _activeRide;
   List<RideModel> _nearbyRides = const [];
   bool _isLoadingDashboard = true;
   String? _dashboardError;
@@ -57,10 +61,83 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   MapLibreMapController? _mapController;
   Line? _homeRouteLine;
   final List<Circle> _homeRouteMarkers = [];
+  final List<Circle> _homeHubCircles = [];
+  final List<Line> _homeCorridorLines = [];
+  Circle? _destinationMarkerCircle;
   int _homeRouteRequestId = 0;
   bool _homeMapStyleLoaded = false;
+  bool _homeMapLoadTimedOut = false;
+  int _homeMapInstance = 0;
   String? _homeRouteError;
-  bool _homeMapVisible = true;
+  bool _homeHubsLoading = false;
+
+  // ── Search & Place Selection State ─────────────────────────────────────────
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+  Timer? _searchDebounceTimer;
+  List<GeocodingResult> _searchSuggestions = [];
+  GeocodingResult? _selectedDestination;
+  RouteResult? _activeRoute;
+
+  // Pre-configured popular campus hubs and landmarks for 0ms instant matching
+  static final List<GeocodingResult> _popularCampusPlaces = [
+    const GeocodingResult(
+      placeId: 'vit-campus',
+      displayName: 'VIT College Campus, Bibwewadi',
+      latitude: 18.46439,
+      longitude: 73.86749,
+      type: 'campus',
+    ),
+    const GeocodingResult(
+      placeId: 'katraj-hub',
+      displayName: 'Katraj Hub & Bus Stand, Pune',
+      latitude: 18.4529,
+      longitude: 73.8553,
+      type: 'hub',
+    ),
+    const GeocodingResult(
+      placeId: 'swargate-hub',
+      displayName: 'Swargate Bus Station & Metro, Pune',
+      latitude: 18.5018,
+      longitude: 73.8586,
+      type: 'hub',
+    ),
+    const GeocodingResult(
+      placeId: 'bibwewadi-corner',
+      displayName: 'Bibwewadi Corner, Pune',
+      latitude: 18.4721,
+      longitude: 73.8634,
+      type: 'landmark',
+    ),
+    const GeocodingResult(
+      placeId: 'upper-indira-nagar',
+      displayName: 'Upper Indira Nagar Hub, Bibwewadi',
+      latitude: 18.4624,
+      longitude: 73.8601,
+      type: 'hub',
+    ),
+    const GeocodingResult(
+      placeId: 'market-yard',
+      displayName: 'Market Yard, Gultekdi, Pune',
+      latitude: 18.4876,
+      longitude: 73.8711,
+      type: 'landmark',
+    ),
+    const GeocodingResult(
+      placeId: 'pune-station',
+      displayName: 'Pune Railway Station, Pune',
+      latitude: 18.5284,
+      longitude: 73.8744,
+      type: 'transit',
+    ),
+    const GeocodingResult(
+      placeId: 'shivajinagar',
+      displayName: 'Shivajinagar Station & Bus Stand, Pune',
+      latitude: 18.5314,
+      longitude: 73.8446,
+      type: 'transit',
+    ),
+  ];
 
   @override
   void initState() {
@@ -72,10 +149,14 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               : 'there');
     _loadDashboardData();
     RoutePreviewStore.instance.addListener(_onRoutePreviewChanged);
+    if (!isFlutterTest) _startHomeMapLoadTimeout();
   }
 
   @override
   void dispose() {
+    _searchDebounceTimer?.cancel();
+    _searchController.dispose();
+    _searchFocusNode.dispose();
     RoutePreviewStore.instance.removeListener(_onRoutePreviewChanged);
     super.dispose();
   }
@@ -88,7 +169,300 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       _clearHomeRoute();
       return;
     }
+    setState(() {
+      _activeRoute = route;
+      if (_selectedDestination == null && destination.displayName.isNotEmpty) {
+        _searchController.text = destination.displayName.split(',').first.trim();
+        _selectedDestination = destination;
+      }
+    });
     _displayHomeRoute(route, origin, destination);
+  }
+
+  void _onSearchQueryChanged(String query) {
+    _searchDebounceTimer?.cancel();
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) {
+      setState(() {
+        _searchSuggestions = [];
+      });
+      return;
+    }
+
+    // Instantly filter known popular campus locations
+    final localMatches = _popularCampusPlaces
+        .where((place) =>
+            place.displayName.toLowerCase().contains(trimmed.toLowerCase()))
+        .toList();
+
+    setState(() {
+      _searchSuggestions = localMatches;
+    });
+
+    if (trimmed.length < 2) return;
+
+    _searchDebounceTimer = Timer(const Duration(milliseconds: 350), () async {
+      try {
+        final apiResults = await GeocodingService.search(trimmed);
+        if (!mounted || _searchController.text.trim() != trimmed) return;
+
+        final combined = List<GeocodingResult>.of(localMatches);
+        for (final item in apiResults) {
+          final isDuplicate = combined.any((p) =>
+              (p.latitude - item.latitude).abs() < 0.001 &&
+              (p.longitude - item.longitude).abs() < 0.001);
+          if (!isDuplicate) combined.add(item);
+        }
+
+        setState(() {
+          _searchSuggestions = combined;
+        });
+      } catch (_) {}
+    });
+  }
+
+  Future<void> _onSelectDestination(GeocodingResult place) async {
+    _searchFocusNode.unfocus();
+    final shortName = place.displayName.split(',').first.trim();
+    _searchController.text = shortName;
+    setState(() {
+      _selectedDestination = place;
+      _searchSuggestions = [];
+      _homeRouteError = null;
+    });
+
+    await _showDestinationOnMap(place);
+
+    try {
+      const campusLat = 18.46439;
+      const campusLon = 73.86749;
+      final route = await RoutingService.getDrivingRoute(
+        originLatitude: campusLat,
+        originLongitude: campusLon,
+        destinationLatitude: place.latitude,
+        destinationLongitude: place.longitude,
+      );
+      if (!mounted) return;
+
+      const campusOrigin = GeocodingResult(
+        placeId: 'vit-campus',
+        displayName: 'VIT College Campus',
+        latitude: campusLat,
+        longitude: campusLon,
+        type: 'campus',
+      );
+
+      RoutePreviewStore.instance.setPreview(
+        route: route,
+        origin: campusOrigin,
+        destination: place,
+      );
+
+      setState(() {
+        _activeRoute = route;
+      });
+
+      await _displayHomeRoute(route, campusOrigin, place);
+      _filterRidesForDestination(shortName);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _homeRouteError = 'Could not calculate route to $shortName: $e';
+        });
+      }
+    }
+  }
+
+  void _clearSearchAndRoute() {
+    _searchController.clear();
+    _searchFocusNode.unfocus();
+    setState(() {
+      _selectedDestination = null;
+      _searchSuggestions = [];
+      _activeRoute = null;
+      _homeRouteError = null;
+    });
+    RoutePreviewStore.instance.clear();
+    _clearHomeRoute();
+    if (_destinationMarkerCircle != null && _mapController != null) {
+      try {
+        _mapController!.removeCircle(_destinationMarkerCircle!);
+      } catch (_) {}
+      _destinationMarkerCircle = null;
+    }
+    _mapController?.animateCamera(
+      CameraUpdate.newCameraPosition(MapConfig.initialCameraPosition),
+    );
+    _loadDashboardData();
+  }
+
+  Future<void> _showDestinationOnMap(GeocodingResult place) async {
+    final controller = _mapController;
+    if (controller == null || !_homeMapStyleLoaded) return;
+
+    try {
+      if (_destinationMarkerCircle != null) {
+        await controller.removeCircle(_destinationMarkerCircle!);
+        _destinationMarkerCircle = null;
+      }
+
+      final circle = await controller.addCircle(
+        CircleOptions(
+          geometry: LatLng(place.latitude, place.longitude),
+          circleColor: '#D32F2F',
+          circleRadius: 10,
+          circleStrokeColor: '#FFFFFF',
+          circleStrokeWidth: 3,
+          circleOpacity: 1.0,
+        ),
+      );
+      _destinationMarkerCircle = circle;
+
+      await controller.animateCamera(
+        CameraUpdate.newLatLngZoom(
+          LatLng(place.latitude, place.longitude),
+          14.5,
+        ),
+      );
+    } catch (e) {
+      debugPrint('Error placing destination pin: $e');
+    }
+  }
+
+  Future<void> _onHomeMapTap(Point<double> _, LatLng coordinates) async {
+    // 1. Check if user tapped close to any of our known popular campus places (within ~400m)
+    GeocodingResult? matchedPlace;
+    for (final place in _popularCampusPlaces) {
+      final latDiff = (place.latitude - coordinates.latitude).abs();
+      final lonDiff = (place.longitude - coordinates.longitude).abs();
+      if (latDiff < 0.005 && lonDiff < 0.005) {
+        matchedPlace = place;
+        break;
+      }
+    }
+
+    if (matchedPlace != null) {
+      await _onSelectDestination(matchedPlace);
+      return;
+    }
+
+    // 2. Otherwise reverse geocode the tapped coordinate
+    try {
+      final reverseResult = await GeocodingService.reverse(
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+      );
+      if (!mounted) return;
+      await _onSelectDestination(reverseResult);
+    } catch (_) {
+      final fallbackPlace = GeocodingResult(
+        placeId: 'pinned-${coordinates.latitude.toStringAsFixed(4)}-${coordinates.longitude.toStringAsFixed(4)}',
+        displayName: 'Pinned Location (${coordinates.latitude.toStringAsFixed(3)}, ${coordinates.longitude.toStringAsFixed(3)})',
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+        type: 'pinned',
+      );
+      if (!mounted) return;
+      await _onSelectDestination(fallbackPlace);
+    }
+  }
+
+  Future<void> _loadHomeHubs() async {
+    final controller = _mapController;
+    if (controller == null || _homeHubsLoading) return;
+    _homeHubsLoading = true;
+
+    try {
+      final corridors = await RouteService.listCorridors();
+      if (!mounted || controller != _mapController) return;
+
+      if (_homeCorridorLines.isNotEmpty) {
+        for (final line in _homeCorridorLines) {
+          try {
+            await controller.removeLine(line);
+          } catch (_) {}
+        }
+        _homeCorridorLines.clear();
+      }
+      if (_homeHubCircles.isNotEmpty) {
+        await controller.removeCircles(List.of(_homeHubCircles));
+        _homeHubCircles.clear();
+      }
+
+      final lineOptions = corridors
+          .where((c) => c.geometryCoordinates.length >= 2)
+          .map((c) => LineOptions(
+                geometry: c.geometryCoordinates
+                    .map((pt) => LatLng(pt[1], pt[0]))
+                    .toList(),
+                lineColor: c.id == 'katraj-vit' ? '#2E7D32' : '#1565C0',
+                lineWidth: 4,
+                lineOpacity: 0.75,
+                lineJoin: 'round',
+              ))
+          .toList();
+      if (lineOptions.isNotEmpty) {
+        final addedLines = await controller.addLines(lineOptions);
+        _homeCorridorLines.addAll(addedLines);
+      }
+
+      final hubsById = <String, HubModel>{};
+      for (final c in corridors) {
+        for (final h in c.hubs) {
+          if (h.id.isNotEmpty && h.latitude != 0 && h.longitude != 0) {
+            hubsById[h.id] = h;
+          }
+        }
+      }
+
+      final circleOptions = hubsById.values
+          .map((h) => CircleOptions(
+                geometry: LatLng(h.latitude, h.longitude),
+                circleColor: '#1565C0',
+                circleRadius: 6,
+                circleStrokeColor: '#FFFFFF',
+                circleStrokeWidth: 2,
+                circleOpacity: 0.95,
+              ))
+          .toList();
+
+      // Add prominent VIT Campus marker
+      circleOptions.add(
+        const CircleOptions(
+          geometry: LatLng(18.46439, 73.86749),
+          circleColor: '#E65100',
+          circleRadius: 10,
+          circleStrokeColor: '#FFFFFF',
+          circleStrokeWidth: 3,
+          circleOpacity: 1.0,
+        ),
+      );
+
+      final addedCircles = await controller.addCircles(circleOptions);
+      _homeHubCircles.addAll(addedCircles);
+    } catch (e) {
+      debugPrint('Could not load campus hubs on home map: $e');
+    } finally {
+      _homeHubsLoading = false;
+    }
+  }
+
+  Future<void> _filterRidesForDestination(String destinationQuery) async {
+    setState(() => _isLoadingDashboard = true);
+    try {
+      final rides = await RideService.searchRides({
+        'to': destinationQuery,
+        'limit': '10',
+      });
+      if (!mounted) return;
+      setState(() {
+        _nearbyRides = rides;
+        _isLoadingDashboard = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isLoadingDashboard = false);
+    }
   }
 
   Future<void> _clearHomeRoute() async {
@@ -194,52 +568,67 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   }
 
   Future<void> _openHomeRoute(Widget screen) async {
-    setState(() => _homeMapVisible = false);
-    await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
     await Navigator.of(
       context,
       rootNavigator: true,
     ).push<void>(MaterialPageRoute<void>(builder: (_) => screen));
-    if (mounted) setState(() => _homeMapVisible = true);
+  }
+
+  void _openFindRides() {
+    final dest = _searchController.text.trim();
+    _openHomeRoute(FindRidesScreen(
+      initialDestination: dest.isNotEmpty ? dest : null,
+    ));
+  }
+
+  void _startHomeMapLoadTimeout() {
+    Future<void>.delayed(const Duration(seconds: 12), () {
+      if (mounted && !_homeMapStyleLoaded) {
+        setState(() => _homeMapLoadTimedOut = true);
+      }
+    });
+  }
+
+  void _retryHomeMap() {
+    setState(() {
+      _homeMapStyleLoaded = false;
+      _homeMapLoadTimedOut = false;
+      _mapController = null;
+      _homeMapInstance++;
+    });
+    _startHomeMapLoadTimeout();
   }
 
   Future<void> _loadDashboardData() async {
+    setState(() {
+      _isLoadingDashboard = true;
+      _dashboardError = null;
+    });
+    final profileRequest = AuthService.loadSession();
     try {
-      final user = await AuthService.loadSession();
-      if (mounted && user?.name.trim().isNotEmpty == true) {
-        setState(() => _displayName = user!.name.trim());
-      }
-      final results = await Future.wait<dynamic>([
-        BookingService.listUserBookings(),
-        RideService.searchRides({'limit': '5'}),
-      ]);
-      final bookings = results[0] as List<BookingModel>;
-      final nearbyRides = results[1] as List<RideModel>;
-      BookingModel? activeBooking;
-      for (final booking in bookings) {
-        final rideStatus = booking.ride?.status.toUpperCase();
-        if (booking.status.toUpperCase() == 'ACCEPTED' &&
-            booking.ride != null &&
-            rideStatus != 'CANCELLED' &&
-            rideStatus != 'COMPLETED') {
-          activeBooking = booking;
-          break;
-        }
-      }
-
+      final nearbyRides = await RideService.searchRides({'limit': '5'});
       if (!mounted) return;
       setState(() {
-        _activeRide = activeBooking?.ride;
         _nearbyRides = nearbyRides;
         _isLoadingDashboard = false;
       });
     } catch (error) {
       if (!mounted) return;
       setState(() {
+        _nearbyRides = const [];
         _isLoadingDashboard = false;
         _dashboardError = error.toString();
       });
+    }
+
+    try {
+      final user = await profileRequest;
+      if (mounted && user?.name.trim().isNotEmpty == true) {
+        setState(() => _displayName = user!.name.trim());
+      }
+    } catch (error) {
+      debugPrint('Could not refresh the home profile: $error');
     }
   }
 
@@ -316,43 +705,121 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         (kIsWeb ||
             defaultTargetPlatform == TargetPlatform.android ||
             defaultTargetPlatform == TargetPlatform.iOS);
+    final hasActiveRoute =
+        _activeRoute != null || RoutePreviewStore.instance.route != null;
+    final displayRoute =
+        _activeRoute ?? RoutePreviewStore.instance.route;
+    final scrollBehavior = ScrollConfiguration.of(context);
+
     return Stack(
       children: [
-        if (supportsMap && _homeMapVisible)
+        // ── Native Map or Desktop Fallback ──
+        if (supportsMap)
           Positioned.fill(
             child: MapLibreMap(
+              key: ValueKey(_homeMapInstance),
               styleString: MapConfig.styleUrl,
               initialCameraPosition: MapConfig.initialCameraPosition,
-              gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-                Factory<EagerGestureRecognizer>(() => EagerGestureRecognizer()),
-              },
+              rotateGesturesEnabled: true,
+              scrollGesturesEnabled: true,
+              zoomGesturesEnabled: true,
+              tiltGesturesEnabled: true,
+              doubleClickZoomEnabled: true,
+              dragEnabled: true,
+              trackCameraPosition: true,
+              onMapClick: _onHomeMapTap,
               onMapCreated: (controller) {
                 _mapController = controller;
-                if (_homeMapStyleLoaded) _onRoutePreviewChanged();
+                if (_homeMapStyleLoaded) {
+                  _loadHomeHubs();
+                  _onRoutePreviewChanged();
+                }
               },
               onStyleLoadedCallback: () {
                 _homeMapStyleLoaded = true;
+                _homeMapLoadTimedOut = false;
+                _loadHomeHubs();
                 _onRoutePreviewChanged();
+                if (mounted) setState(() {});
               },
             ),
           )
         else
-          const Positioned.fill(
-            child: ColoredBox(
-              color: AppColors.background,
-              child: Center(
-                child: Text('Map preview is available on mobile and web.'),
+          Positioned.fill(
+            child: _buildDesktopMapFallback(),
+          ),
+
+        // ── Map Loading / Slow Warning Badge (Non-blocking) ──
+        if (supportsMap && !_homeMapStyleLoaded)
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 72,
+            left: AppSpacing.marginMobile,
+            child: PointerInterceptor(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.92),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2)),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_homeMapLoadTimedOut) ...[
+                      const Icon(Icons.refresh_rounded, size: 16, color: Colors.orange),
+                      const SizedBox(width: 6),
+                      const Text(
+                        'Map loading slowly',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                      ),
+                      const SizedBox(width: 6),
+                      GestureDetector(
+                        onTap: _retryHomeMap,
+                        child: const Text(
+                          'Retry',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ] else ...[
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Loading map tiles...',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
           ),
-        DraggableScrollableSheet(
-          initialChildSize: 0.30,
-          minChildSize: 0.18,
-          maxChildSize: 0.78,
-          snap: true,
-          snapSizes: const [0.30, 0.78],
-          builder: (context, scrollController) => PointerInterceptor(
-            child: Container(
+
+        // ── Bottom Draggable Pools Sheet ──
+        ScrollConfiguration(
+          behavior: scrollBehavior.copyWith(
+            dragDevices: {
+              ...scrollBehavior.dragDevices,
+              PointerDeviceKind.mouse,
+            },
+          ),
+          child: DraggableScrollableSheet(
+            initialChildSize: 0.30,
+            minChildSize: 0.18,
+            maxChildSize: 0.78,
+            snap: true,
+            snapSizes: const [0.30, 0.78],
+            builder: (context, scrollController) => PointerInterceptor(
+              child: Container(
               decoration: const BoxDecoration(
                 color: AppColors.surface,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
@@ -384,11 +851,30 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                     ),
                   ),
                   const SizedBox(height: AppSpacing.md),
-                  Text(
-                    'Available pools near you',
-                    style: AppTypography.headlineSm.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _selectedDestination != null
+                              ? 'Rides to ${_selectedDestination!.displayName.split(',').first}'
+                              : 'Available pools near you',
+                          style: AppTypography.headlineSm.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (_selectedDestination != null)
+                        TextButton(
+                          onPressed: _clearSearchAndRoute,
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          ),
+                          child: const Text('Show all'),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   if (_isLoadingDashboard)
@@ -396,11 +882,52 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                       padding: EdgeInsets.all(AppSpacing.lg),
                       child: Center(child: CircularProgressIndicator()),
                     )
+                  else if (_dashboardError != null)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Could not load available pools: $_dashboardError',
+                          style: AppTypography.bodySm.copyWith(
+                            color: AppColors.error,
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: _loadDashboardData,
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('Retry'),
+                        ),
+                      ],
+                    )
                   else if (_nearbyRides.isEmpty)
-                    Text(
-                      'No rides found near VIT College yet.',
-                      style: AppTypography.bodySm.copyWith(
-                        color: AppColors.onSurfaceVariant,
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _selectedDestination != null
+                                ? 'No direct rides found to ${_selectedDestination!.displayName.split(',').first} right now.'
+                                : 'No rides found near VIT College yet.',
+                            style: AppTypography.bodySm.copyWith(
+                              color: AppColors.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          ElevatedButton.icon(
+                            onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => FindRidesScreen(
+                                  initialOrigin: 'VIT Pune',
+                                  initialDestination: _selectedDestination?.displayName,
+                                ),
+                              ),
+                            ),
+                            icon: const Icon(Icons.search_rounded, size: 18),
+                            label: const Text('Search Custom Time & Date'),
+                          ),
+                        ],
                       ),
                     )
                   else
@@ -415,95 +942,114 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             ),
           ),
         ),
-        Positioned(
-          top: MediaQuery.of(context).padding.top + AppSpacing.sm,
-          left: AppSpacing.marginMobile,
-          right: AppSpacing.marginMobile,
-          child: PointerInterceptor(child: _buildMapSearchPanel()),
         ),
+
+        // ── Top Bar with Search, Hub Chips & Active Route Banner ──
         Positioned(
-          top: MediaQuery.of(context).padding.top + 76,
-          right: AppSpacing.marginMobile,
+          top: 0,
+          left: 0,
+          right: 0,
           child: PointerInterceptor(
-            child: ElevatedButton.icon(
-              onPressed: () => _openHomeRoute(const MapScreen()),
-              icon: const Icon(Icons.map_outlined, size: 18),
-              label: const Text('Campus Map'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.surface,
-                foregroundColor: AppColors.primary,
-                elevation: 4,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: AppSpacing.radiusFull,
-                ),
-              ),
-            ),
-          ),
-        ),
-        if (RoutePreviewStore.instance.route != null)
-          Positioned(
-            left: AppSpacing.marginMobile,
-            right: AppSpacing.marginMobile,
-            top: MediaQuery.of(context).padding.top + 132,
-            child: Card(
+            child: SafeArea(
+              bottom: false,
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.marginMobile,
+                  AppSpacing.sm,
+                  AppSpacing.marginMobile,
+                  0,
                 ),
-                child: Text(
-                  _homeRouteError ??
-                      'Route: ${RoutePreviewStore.instance.route!.formattedDistance} · '
-                          'Fare: ${formatRideFare(RoutePreviewStore.instance.route!.distanceMeters)}/seat',
-                  style: AppTypography.bodySm,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildMapSearchPanel(),
+                    if (_searchSuggestions.isNotEmpty) _buildSearchSuggestionsDropdown(),
+                    const SizedBox(height: 8),
+                    _buildQuickCampusHubChips(),
+                    if (hasActiveRoute && displayRoute != null) ...[
+                      const SizedBox(height: 8),
+                      _buildActiveRouteBanner(displayRoute),
+                    ],
+                  ],
                 ),
               ),
             ),
           ),
+        ),
+
+        // ── Floating Action Buttons & Map Controls (Right Side) ──
         Positioned(
           right: AppSpacing.marginMobile,
-          bottom: MediaQuery.of(context).size.height * 0.34,
+          top: MediaQuery.of(context).padding.top + 120,
           child: PointerInterceptor(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FloatingActionButton.small(
-                  heroTag: 'home-zoom-in',
-                  tooltip: 'Zoom in',
-                  backgroundColor: AppColors.surface,
-                  foregroundColor: AppColors.primary,
-                  onPressed: () =>
-                      _mapController?.animateCamera(CameraUpdate.zoomIn()),
-                  child: const Icon(Icons.add),
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton.small(
-                  heroTag: 'home-zoom-out',
-                  tooltip: 'Zoom out',
-                  backgroundColor: AppColors.surface,
-                  foregroundColor: AppColors.primary,
-                  onPressed: () =>
-                      _mapController?.animateCamera(CameraUpdate.zoomOut()),
-                  child: const Icon(Icons.remove),
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton.small(
-                  heroTag: 'home-location',
-                  tooltip: 'Reset map view',
-                  backgroundColor: AppColors.surface,
-                  foregroundColor: AppColors.primary,
-                  onPressed: () => _mapController?.animateCamera(
-                    CameraUpdate.newCameraPosition(
-                      MapConfig.initialCameraPosition,
+            child: SizedBox(
+              width: 160,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const AutoGroupsScreen(),
+                      ),
+                    ),
+                    icon: const Icon(Icons.groups_rounded, size: 18),
+                    label: const Text('Auto Groups'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.surface,
+                      foregroundColor: AppColors.secondary,
+                      elevation: 4,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: AppSpacing.radiusFull,
+                      ),
                     ),
                   ),
-                  child: const Icon(Icons.my_location_rounded),
-                ),
-              ],
+                  if (supportsMap) ...[
+                    const SizedBox(height: 12),
+                    FloatingActionButton.small(
+                      heroTag: 'home-zoom-in',
+                      tooltip: 'Zoom in',
+                      backgroundColor: AppColors.surface,
+                      foregroundColor: AppColors.primary,
+                      onPressed: () => _mapController?.animateCamera(
+                        CameraUpdate.zoomIn(),
+                      ),
+                      child: const Icon(Icons.add),
+                    ),
+                    const SizedBox(height: 8),
+                    FloatingActionButton.small(
+                      heroTag: 'home-zoom-out',
+                      tooltip: 'Zoom out',
+                      backgroundColor: AppColors.surface,
+                      foregroundColor: AppColors.primary,
+                      onPressed: () => _mapController?.animateCamera(
+                        CameraUpdate.zoomOut(),
+                      ),
+                      child: const Icon(Icons.remove),
+                    ),
+                    const SizedBox(height: 8),
+                    FloatingActionButton.small(
+                      heroTag: 'home-location',
+                      tooltip: 'Reset map view',
+                      backgroundColor: AppColors.surface,
+                      foregroundColor: AppColors.primary,
+                      onPressed: () => _mapController?.animateCamera(
+                        CameraUpdate.newCameraPosition(
+                          MapConfig.initialCameraPosition,
+                        ),
+                      ),
+                      child: const Icon(Icons.my_location_rounded),
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
         ),
@@ -511,39 +1057,386 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
-  Widget _buildMapSearchPanel() {
-    return Material(
-      elevation: 5,
-      shadowColor: Colors.black26,
-      borderRadius: AppSpacing.radiusLg,
-      color: AppColors.surface,
-      child: InkWell(
-        borderRadius: AppSpacing.radiusLg,
-        onTap: () => _openHomeRoute(const FindRidesScreen()),
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          child: Row(
-            children: [
-              const Icon(Icons.search_rounded, color: AppColors.primary),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Text(
-                  'Where do you want to go?',
-                  style: AppTypography.bodyMd.copyWith(
-                    color: AppColors.onSurfaceVariant,
+  Widget _buildDesktopMapFallback() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFE8F0FE), Color(0xFFF1F3F4), Color(0xFFE3F2FD)],
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -40,
+            top: 60,
+            child: Icon(
+              Icons.explore_outlined,
+              size: 240,
+              color: Colors.blue.withValues(alpha: 0.08),
+            ),
+          ),
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 80, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: const [
+                        BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 2)),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withValues(alpha: 0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.school_rounded, color: AppColors.primary, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'VIT Pune Campus Hub',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                              ),
+                              Text(
+                                'Bibwewadi, Pune · 18.464° N, 73.867° E',
+                                style: TextStyle(color: Colors.black54, fontSize: 11),
+                              ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Campus Corridors & Safe Hubs',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Colors.black87),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _popularCampusPlaces.skip(1).take(5).map((hub) {
+                      final isSelected = _selectedDestination?.placeId == hub.placeId;
+                      return ActionChip(
+                        avatar: Icon(
+                          isSelected ? Icons.check_circle_rounded : Icons.location_on_rounded,
+                          size: 14,
+                          color: isSelected ? Colors.white : AppColors.primary,
+                        ),
+                        backgroundColor: isSelected ? AppColors.primary : Colors.white,
+                        labelStyle: TextStyle(
+                          color: isSelected ? Colors.white : Colors.black87,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                        label: Text(hub.displayName.split(',').first),
+                        onPressed: () => _onSelectDestination(hub),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickCampusHubChips() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      child: Row(
+        children: _popularCampusPlaces.skip(1).map((hub) {
+          final isSelected = _selectedDestination?.placeId == hub.placeId;
+          final shortName = hub.displayName.split(',').first.trim();
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ActionChip(
+              avatar: Icon(
+                isSelected ? Icons.check_circle_rounded : Icons.location_on_rounded,
+                size: 14,
+                color: isSelected ? Colors.white : AppColors.primary,
+              ),
+              backgroundColor: isSelected ? AppColors.primary : AppColors.surface,
+              elevation: 2,
+              shadowColor: Colors.black26,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              labelStyle: TextStyle(
+                color: isSelected ? Colors.white : AppColors.onSurface,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                fontSize: 12,
+              ),
+              label: Text(shortName),
+              onPressed: () => _onSelectDestination(hub),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildActiveRouteBanner(RouteResult displayRoute) {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.route_rounded,
+                color: AppColors.primary,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _selectedDestination != null
+                        ? 'To ${_selectedDestination!.displayName.split(',').first}'
+                        : 'Route Preview',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    _homeRouteError ??
+                        '${displayRoute.formattedDistance} · '
+                            'Fare: ${formatRideFare(displayRoute.distanceMeters)}/seat',
+                    style: AppTypography.bodySm.copyWith(
+                      color: AppColors.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => FindRidesScreen(
+                    initialOrigin: 'VIT Pune',
+                    initialDestination: _selectedDestination?.displayName ??
+                        _searchController.text.trim(),
                   ),
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: const BoxDecoration(
-                  color: AppColors.primaryTint,
-                  shape: BoxShape.circle,
+              child: const Text(
+                'Find Rides',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchSuggestionsDropdown() {
+    if (_searchSuggestions.isEmpty) return const SizedBox.shrink();
+    return Card(
+      elevation: 6,
+      margin: const EdgeInsets.only(top: 4),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: ListView.separated(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        itemCount: _searchSuggestions.length.clamp(0, 4),
+        separatorBuilder: (_, __) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final place = _searchSuggestions[index];
+          return ListTile(
+            dense: true,
+            leading: const Icon(Icons.location_on_outlined, size: 20, color: AppColors.primary),
+            title: Text(
+              place.displayName.split(',').first,
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+            ),
+            subtitle: Text(
+              place.displayName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11),
+            ),
+            onTap: () => _onSelectDestination(place),
+          );
+        },
+      ),
+    );
+  }
+
+  void _openSearchDialog() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (modalContext) => PointerInterceptor(
+        child: StatefulBuilder(
+          builder: (context, setModalState) => Container(
+          padding: EdgeInsets.fromLTRB(
+            16,
+            16,
+            16,
+            MediaQuery.of(context).viewInsets.bottom + 16,
+          ),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Search Places & Safe Hubs',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.pop(modalContext),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _searchController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: 'Search destination or campus hub...',
+                  prefixIcon: const Icon(Icons.search),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  suffixIcon: _searchController.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () {
+                            _searchController.clear();
+                            setModalState(() {});
+                            _onSearchQueryChanged('');
+                          },
+                        )
+                      : null,
                 ),
-                child: const Icon(
-                  Icons.tune_rounded,
-                  size: 18,
-                  color: AppColors.primary,
+                onChanged: (val) {
+                  setModalState(() {});
+                  _onSearchQueryChanged(val);
+                },
+              ),
+              if (_searchSuggestions.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                ..._searchSuggestions.take(4).map(
+                  (place) => ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.location_on, color: AppColors.primary),
+                    title: Text(place.displayName.split(',').first),
+                    subtitle: Text(place.displayName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    onTap: () {
+                      Navigator.pop(modalContext);
+                      _onSelectDestination(place);
+                    },
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      ),
+    );
+  }
+
+  Widget _buildMapSearchPanel() {
+    return Material(
+      elevation: 6,
+      shadowColor: Colors.black26,
+      borderRadius: BorderRadius.circular(16),
+      color: AppColors.surface,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: _openFindRides,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              GestureDetector(
+                onTap: _openSearchDialog,
+                child: const Icon(Icons.search_rounded, color: AppColors.primary, size: 22),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  _selectedDestination != null
+                      ? _selectedDestination!.displayName.split(',').first
+                      : 'Where do you want to go?',
+                  style: AppTypography.bodyMd.copyWith(
+                    color: _selectedDestination != null
+                        ? AppColors.onSurface
+                        : AppColors.onSurfaceVariant,
+                    fontWeight: _selectedDestination != null
+                        ? FontWeight.w600
+                        : FontWeight.normal,
+                  ),
+                ),
+              ),
+              if (_selectedDestination != null)
+                GestureDetector(
+                  onTap: _clearSearchAndRoute,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 6),
+                    child: Icon(Icons.close_rounded, size: 18, color: Colors.grey),
+                  ),
+                ),
+              GestureDetector(
+                onTap: _openSearchDialog,
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(
+                    color: AppColors.primaryTint,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.tune_rounded,
+                    size: 18,
+                    color: AppColors.primary,
+                  ),
                 ),
               ),
             ],
@@ -957,107 +1850,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             ),
           ),
         ),
-      ],
-    );
-  }
-
-  // ── Active Ride Section ──────────────────────────────────────────────────
-  Widget _buildActiveRideSection() {
-    if (_isLoadingDashboard) {
-      return const SizedBox(
-        height: 140,
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: AppSpacing.sm),
-          child: Text(
-            'Active Ride',
-            style: AppTypography.labelMd.copyWith(
-              color: AppColors.onSurfaceVariant,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        if (_activeRide != null)
-          _buildRideCard(
-            _activeRide!,
-            status: _activeRide!.status.toUpperCase() == 'ONGOING'
-                ? RideStatusType.active
-                : RideStatusType.confirmed,
-            bookButtonText: 'Track',
-          )
-        else
-          // Empty State
-          Container(
-            height: 140,
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: AppSpacing.radiusLg,
-              border: Border.all(
-                color: AppColors.border,
-                width: 1.5,
-                // Dashed border simulation via BoxDecoration
-              ),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: const BoxDecoration(
-                    color: AppColors.surfaceContainerLow,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.route_rounded,
-                    color: AppColors.outline,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  'No active rides right now.',
-                  style: AppTypography.bodyMd.copyWith(
-                    color: AppColors.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                TextButton(
-                  onPressed: () {
-                    if (widget.embeddedInShell) {
-                      MainNavigationShell.switchTab(context, 1);
-                    } else {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              const MyRidesScreen(initialTabIndex: 0),
-                        ),
-                      );
-                    }
-                  },
-                  style: TextButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    minimumSize: const Size(0, 30),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: Text(
-                    'View History',
-                    style: AppTypography.labelSm.copyWith(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
       ],
     );
   }

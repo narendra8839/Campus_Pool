@@ -32,11 +32,13 @@ class MainNavigationShell extends StatefulWidget {
 
 class _MainNavigationShellState extends State<MainNavigationShell> {
   late int _currentIndex;
+  final Set<int> _visitedTabs = <int>{};
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex.clamp(0, 4);
+    _visitedTabs.add(_currentIndex);
     _recordCurrentRoute();
   }
 
@@ -45,12 +47,16 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.initialIndex != widget.initialIndex) {
       _currentIndex = widget.initialIndex.clamp(0, 4);
+      _visitedTabs.add(_currentIndex);
     }
   }
 
   void setTabIndex(int index) {
     if (index >= 0 && index < 5 && _currentIndex != index) {
-      setState(() => _currentIndex = index);
+      setState(() {
+        _currentIndex = index;
+        _visitedTabs.add(index);
+      });
       _recordCurrentRoute();
     }
   }
@@ -78,12 +84,20 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
       child: Scaffold(
         body: IndexedStack(
           index: _currentIndex,
-          children: const [
-            HomeDashboardScreen(embeddedInShell: true),
-            MyRidesScreen(),
-            OfferRideScreen(embeddedInShell: true),
-            MapScreen(),
-            ProfileScreen(),
+          children: [
+            const HomeDashboardScreen(embeddedInShell: true),
+            _visitedTabs.contains(1)
+                ? const MyRidesScreen()
+                : const SizedBox.shrink(),
+            _visitedTabs.contains(2)
+                ? const OfferRideScreen(embeddedInShell: true)
+                : const SizedBox.shrink(),
+            _visitedTabs.contains(3)
+                ? const MapScreen()
+                : const SizedBox.shrink(),
+            _visitedTabs.contains(4)
+                ? const ProfileScreen()
+                : const SizedBox.shrink(),
           ],
         ),
         bottomNavigationBar: AppBottomNavBar(

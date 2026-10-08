@@ -13,9 +13,10 @@ import 'theme/app_theme.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Hybrid composition avoids blank/black native map views on some Android
-  // devices and MIUI emulator images.
-  MapLibreMap.useHybridComposition = true;
+  // Hybrid composition causes overlay buffer allocation failures (Gralloc4/AHardwareBuffer)
+  // on Android 14 with Impeller, which hides Flutter UI elements drawn over the map.
+  // Using texture composition (false) allows Flutter to composite overlays properly.
+  MapLibreMap.useHybridComposition = false;
   ApiService.onUnauthorized = _handleExpiredSession;
   runApp(const CampusPoolApp());
 }

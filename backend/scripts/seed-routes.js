@@ -99,9 +99,25 @@ async function main() {
   } });
   await prisma.ride.update({ where: { id: rides[0].id }, data: { availableSeats: 0 } });
   await prisma.review.create({ data: { id: id('review', 'seed'), rideId: rides[0].id, reviewerId: users[0].id, revieweeId: users[2].id, rating: 5, comment: 'Great commute.' } });
-  const group = await prisma.autoGroup.create({ data: { id: id('auto-group', 'seed'), pickupName: corridors[0].originName, normalizedPickupName: normalise(corridors[0].originName), destinationName: 'VIT College', normalizedDestinationName: 'vit college', departureTime: new Date('2027-01-13T07:30:00+05:30') } });
+  const groupRoute = routeRecords[0];
+  const group = await prisma.autoGroup.create({ data: {
+    id: id('auto-group', 'seed'), corridorId: groupRoute.corridor.id,
+    pickupName: corridors[0].originName, normalizedPickupName: normalise(corridors[0].originName),
+    destinationName: 'VIT College', normalizedDestinationName: 'vit college',
+    departureTime: new Date('2027-01-13T07:30:00+05:30'),
+  } });
   for (let i = 3; i < 6; i += 1) {
-    const request = await prisma.autoRequest.create({ data: { id: id('route-seed-auto-request', i), userId: users[i].id, pickupName: corridors[0].originName, normalizedPickupName: normalise(corridors[0].originName), destinationName: 'VIT College', normalizedDestinationName: 'vit college', desiredDepartureTime: group.departureTime, status: 'MATCHED' } });
+    const pickup = groupRoute.links[i - 3];
+    const destination = groupRoute.links[groupRoute.links.length - 1 - (i - 3)];
+    const pickupName = corridors[0].hubs[i - 3].name;
+    const destinationName = corridors[0].hubs[corridors[0].hubs.length - 1 - (i - 3)].name;
+    const request = await prisma.autoRequest.create({ data: {
+      id: id('route-seed-auto-request', i), userId: users[i].id,
+      corridorId: groupRoute.corridor.id, pickupHubId: pickup.hubId, destinationHubId: destination.hubId,
+      pickupName, normalizedPickupName: normalise(pickupName),
+      destinationName, normalizedDestinationName: normalise(destinationName),
+      desiredDepartureTime: group.departureTime, status: 'MATCHED',
+    } });
     await prisma.autoGroupMember.create({ data: { id: id('route-seed-auto-member', i), groupId: group.id, userId: users[i].id, requestId: request.id } });
   }
   await prisma.autoGroup.update({ where: { id: group.id }, data: { status: 'READY' } });

@@ -66,6 +66,8 @@ model Corridor {
   updatedAt       DateTime      @updatedAt
   hubs            CorridorHub[]
   rides           Ride[]
+  autoRequests    AutoRequest[]
+  autoGroups      AutoGroup[]
 
   @@map("corridors")
 }
@@ -81,6 +83,8 @@ model Hub {
   corridors        CorridorHub[]
   originRides      Ride[]        @relation("RideOriginHub")
   destinationRides Ride[]        @relation("RideDestinationHub")
+  autoPickupRequests AutoRequest[] @relation("AutoRequestPickupHub")
+  autoDropoffRequests AutoRequest[] @relation("AutoRequestDropoffHub")
 
   @@map("hubs")
 }
@@ -200,6 +204,12 @@ model AutoRequest {
   id                        String           @id @default(uuid())
   userId                    String
   user                      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  corridorId                String?
+  corridor                  Corridor?        @relation(fields: [corridorId], references: [id], onDelete: SetNull)
+  pickupHubId               String?
+  pickupHub                 Hub?             @relation("AutoRequestPickupHub", fields: [pickupHubId], references: [id], onDelete: SetNull)
+  destinationHubId          String?
+  destinationHub            Hub?             @relation("AutoRequestDropoffHub", fields: [destinationHubId], references: [id], onDelete: SetNull)
   pickupName                String
   normalizedPickupName      String
   destinationName           String
@@ -210,14 +220,17 @@ model AutoRequest {
   createdAt                 DateTime         @default(now())
   updatedAt                 DateTime         @updatedAt
 
+  @@index([corridorId, desiredDepartureTime, status])
   @@index([normalizedPickupName, normalizedDestinationName, desiredDepartureTime, status])
   @@index([userId, status])
   @@map("auto_requests")
 }
 
-// A rule-based group of 3-4 students going from the same area to the same destination.
+// A rule-based group of 3-4 students sharing a segment of the same corridor.
 model AutoGroup {
   id                        String            @id @default(uuid())
+  corridorId                String?
+  corridor                  Corridor?         @relation(fields: [corridorId], references: [id], onDelete: SetNull)
   pickupName                String
   normalizedPickupName      String
   destinationName           String
@@ -229,6 +242,7 @@ model AutoGroup {
   createdAt                 DateTime          @default(now())
   updatedAt                 DateTime          @updatedAt
 
+  @@index([corridorId, departureTime, status])
   @@index([normalizedPickupName, normalizedDestinationName, departureTime, status])
   @@map("auto_groups")
 }
