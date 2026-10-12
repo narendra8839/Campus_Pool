@@ -423,25 +423,32 @@ POST /api/auth/register
 
 ### 🚕 Auto Groups (`/api/auto-groups`)
 
-Version 1 coordinates students travelling from the same typed pickup area to the same typed destination within **15 minutes**. A group has up to four students and becomes ready at three members. It does **not** calculate fares, collect payments, or book an auto.
+Students create visible group listings; other students browse them and request to join. The organizer accepts or declines each request. All members must travel in the same direction on a shared segment of the corridor and depart within **15 minutes** of the listing. Groups hold three or four students and become ready at three. This feature does **not** calculate fares, collect payments, or book an auto.
 
 | Method | Endpoint | Description | Auth Required |
 | :--- | :--- | :--- | :---: |
-| `POST` | `/api/auto-groups/requests` | Create a request and join/create a compatible group | Yes |
-| `GET` | `/api/auto-groups/my-groups` | View the current student's active groups | Yes |
+| `GET` | `/api/auto-groups/browse` | Browse future open listings and your request status | Yes |
+| `POST` | `/api/auto-groups/groups` | Create a listing and become its organizer | Yes |
+| `POST` | `/api/auto-groups/:id/join-requests` | Request to join with your own route and time | Yes |
+| `PATCH` | `/api/auto-groups/:id/join-requests/:requestId` | Organizer accepts or declines (`{ "decision": "ACCEPT" }`) | Yes |
+| `GET` | `/api/auto-groups/my-groups` | View groups you joined/organized and pending requests | Yes |
 | `GET` | `/api/auto-groups/:id` | View a group the current student belongs to | Yes |
 | `PATCH` | `/api/auto-groups/:id/confirm` | Confirm attendance once the group is ready | Yes |
-| `PATCH` | `/api/auto-groups/:id/leave` | Leave an auto group | Yes |
+| `PATCH` | `/api/auto-groups/:id/leave` | Leave a group or cancel your own listing | Yes |
 
-Example request:
+Create-listing and join-request bodies:
 
 ```json
 {
-  "pickupName": "Viman Nagar",
-  "destinationName": "College Main Gate",
-  "desiredDepartureTime": "2026-09-02T03:30:00.000Z"
+  "corridorId": "corridor-id",
+  "pickupHubId": "pickup-hub-id",
+  "destinationHubId": "destination-hub-id",
+  "desiredDepartureTime": "2026-09-02T03:30:00.000Z",
+  "maxMembers": 4
 }
 ```
+
+`maxMembers` is only used when creating a listing. Join requests send the pickup, destination, and departure time, which must match the listed route and be within the permitted time window. Apply the updated schema with `npm run prisma:push` before deploying the API.
 
 ---
 

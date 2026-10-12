@@ -44,13 +44,15 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relations
-  ridesOffered     Ride[]            @relation("DriverRides")
-  bookings         Booking[]         @relation("PassengerBookings")
-  reviewsGiven     Review[]          @relation("ReviewsGiven")
-  reviewsReceived  Review[]          @relation("ReviewsReceived")
-  autoRequests     AutoRequest[]
-  autoGroupMembers AutoGroupMember[]
-  schedules        StudentSchedule[]
+  ridesOffered          Ride[]                 @relation("DriverRides")
+  bookings              Booking[]              @relation("PassengerBookings")
+  reviewsGiven          Review[]               @relation("ReviewsGiven")
+  reviewsReceived       Review[]               @relation("ReviewsReceived")
+  autoRequests          AutoRequest[]
+  autoGroupMembers      AutoGroupMember[]
+  organizedAutoGroups   AutoGroup[]            @relation("AutoGroupOrganizer")
+  autoGroupJoinRequests AutoGroupJoinRequest[]
+  schedules             StudentSchedule[]
 
   @@map("users")
 }
@@ -73,18 +75,20 @@ model Corridor {
 }
 
 model Hub {
-  id               String        @id @default(uuid())
-  name             String        @unique
-  normalizedName   String        @unique
-  latitude         Float?
-  longitude        Float?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-  corridors        CorridorHub[]
-  originRides      Ride[]        @relation("RideOriginHub")
-  destinationRides Ride[]        @relation("RideDestinationHub")
-  autoPickupRequests AutoRequest[] @relation("AutoRequestPickupHub")
-  autoDropoffRequests AutoRequest[] @relation("AutoRequestDropoffHub")
+  id                       String                 @id @default(uuid())
+  name                     String                 @unique
+  normalizedName           String                 @unique
+  latitude                 Float?
+  longitude                Float?
+  createdAt                DateTime               @default(now())
+  updatedAt                DateTime               @updatedAt
+  corridors                CorridorHub[]
+  originRides              Ride[]                 @relation("RideOriginHub")
+  destinationRides         Ride[]                 @relation("RideDestinationHub")
+  autoPickupRequests       AutoRequest[]          @relation("AutoRequestPickupHub")
+  autoDropoffRequests      AutoRequest[]          @relation("AutoRequestDropoffHub")
+  autoGroupPickupRequests  AutoGroupJoinRequest[] @relation("AutoGroupJoinPickupHub")
+  autoGroupDropoffRequests AutoGroupJoinRequest[] @relation("AutoGroupJoinDropoffHub")
 
   @@map("hubs")
 }
@@ -228,23 +232,50 @@ model AutoRequest {
 
 // A rule-based group of 3-4 students sharing a segment of the same corridor.
 model AutoGroup {
-  id                        String            @id @default(uuid())
+  id                        String                 @id @default(uuid())
+  organizerId               String?
+  organizer                 User?                  @relation("AutoGroupOrganizer", fields: [organizerId], references: [id], onDelete: SetNull)
   corridorId                String?
-  corridor                  Corridor?         @relation(fields: [corridorId], references: [id], onDelete: SetNull)
+  corridor                  Corridor?              @relation(fields: [corridorId], references: [id], onDelete: SetNull)
   pickupName                String
   normalizedPickupName      String
   destinationName           String
   normalizedDestinationName String
   departureTime             DateTime
-  maxMembers                Int               @default(4)
-  status                    String            @default("FORMING") // FORMING, READY, CONFIRMED, COMPLETED, CANCELLED
+  maxMembers                Int                    @default(4)
+  status                    String                 @default("FORMING") // FORMING, READY, CONFIRMED, COMPLETED, CANCELLED
   members                   AutoGroupMember[]
-  createdAt                 DateTime          @default(now())
-  updatedAt                 DateTime          @updatedAt
+  joinRequests              AutoGroupJoinRequest[]
+  createdAt                 DateTime               @default(now())
+  updatedAt                 DateTime               @updatedAt
 
   @@index([corridorId, departureTime, status])
+  @@index([organizerId, status])
   @@index([normalizedPickupName, normalizedDestinationName, departureTime, status])
   @@map("auto_groups")
+}
+
+model AutoGroupJoinRequest {
+  id                   String    @id @default(uuid())
+  groupId              String
+  group                AutoGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId               String
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pickupHubId          String
+  pickupHub            Hub       @relation("AutoGroupJoinPickupHub", fields: [pickupHubId], references: [id], onDelete: Restrict)
+  destinationHubId     String
+  destinationHub       Hub       @relation("AutoGroupJoinDropoffHub", fields: [destinationHubId], references: [id], onDelete: Restrict)
+  pickupName           String
+  destinationName      String
+  desiredDepartureTime DateTime
+  status               String    @default("PENDING") // PENDING, ACCEPTED, DECLINED, WITHDRAWN
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@unique([groupId, userId])
+  @@index([groupId, status, createdAt])
+  @@index([userId, status])
+  @@map("auto_group_join_requests")
 }
 
 model AutoGroupMember {

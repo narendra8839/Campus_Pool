@@ -163,11 +163,50 @@ const createAutoRequest = async (req, res, next) => {
 const getMyAutoGroups = async (req, res, next) => {
   try {
     const groups = await prisma.autoGroup.findMany({
-      where: { members: { some: { userId: req.user.id, status: { not: 'LEFT' } } } },
-      ...includeMembers,
+      where: {
+        OR: [
+          { members: { some: { userId: req.user.id, status: { not: 'LEFT' } } } },
+          { organizerId: req.user.id },
+          {
+            joinRequests: {
+              some: {
+                userId: req.user.id,
+                status: { in: ['PENDING', 'DECLINED'] },
+              },
+            },
+          },
+        ],
+      },
+      include: {
+        ...includeMembers.include,
+        organizer: { select: { id: true, name: true, avatar: true } },
+        joinRequests: {
+          where: { status: { in: ['PENDING', 'DECLINED'] } },
+          include: { user: { select: { id: true, name: true, avatar: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
       orderBy: { departureTime: 'asc' },
     });
-    res.json({ success: true, count: groups.length, data: groups });
+    const visibleGroups = groups.map((group) => {
+      const isOrganizer = group.organizerId === req.user.id;
+      const myJoinRequest = group.joinRequests.find(
+        (request) => request.userId === req.user.id,
+      ) ?? null;
+      return {
+        ...group,
+        isOrganizer,
+        isMember: group.members.some(
+          (member) =>
+            member.userId === req.user.id && member.status !== 'LEFT',
+        ),
+        myJoinRequest,
+        joinRequests: isOrganizer
+          ? group.joinRequests.filter((request) => request.status === 'PENDING')
+          : [],
+      };
+    });
+    res.json({ success: true, count: visibleGroups.length, data: visibleGroups });
   } catch (error) { next(error); }
 };
 
@@ -207,10 +246,37 @@ const leaveAutoGroup = async (req, res, next) => {
     const membership = await prisma.autoGroupMember.findFirst({ where: { groupId: req.params.id, userId: req.user.id, status: { not: 'LEFT' } } });
     if (!membership) return res.status(404).json({ success: false, message: 'Active group membership not found' });
     const group = await prisma.$transaction(async (tx) => {
-      await tx.autoGroupMember.update({ where: { id: membership.id }, data: { status: 'LEFT' } });
-      await tx.autoRequest.update({ where: { id: membership.requestId }, data: { status: 'CANCELLED' } });
-      const activeCount = await tx.autoGroupMember.count({ where: { groupId: req.params.id, status: { not: 'LEFT' } } });
-      await tx.autoGroup.update({ where: { id: req.params.id }, data: { status: activeCount === 0 ? 'CANCELLED' : activeCount >= READY_MEMBER_COUNT ? 'READY' : 'FORMING' } });
+      const isOrganizer = await tx.autoGroup.findFirst({
+        where: { id: req.params.id, organizerId: req.user.id },
+        select: { id: true },
+      });
+      if (isOrganizer) {
+        const memberships = await tx.autoGroupMember.findMany({
+          where: { groupId: req.params.id, status: { not: 'LEFT' } },
+          select: { id: true, requestId: true },
+        });
+        await tx.autoGroupMember.updateMany({
+          where: { id: { in: memberships.map((item) => item.id) } },
+          data: { status: 'LEFT' },
+        });
+        await tx.autoRequest.updateMany({
+          where: { id: { in: memberships.map((item) => item.requestId) } },
+          data: { status: 'CANCELLED' },
+        });
+        await tx.autoGroupJoinRequest.updateMany({
+          where: { groupId: req.params.id, status: 'PENDING' },
+          data: { status: 'DECLINED' },
+        });
+        await tx.autoGroup.update({
+          where: { id: req.params.id },
+          data: { status: 'CANCELLED' },
+        });
+      } else {
+        await tx.autoGroupMember.update({ where: { id: membership.id }, data: { status: 'LEFT' } });
+        await tx.autoRequest.update({ where: { id: membership.requestId }, data: { status: 'CANCELLED' } });
+        const activeCount = await tx.autoGroupMember.count({ where: { groupId: req.params.id, status: { not: 'LEFT' } } });
+        await tx.autoGroup.update({ where: { id: req.params.id }, data: { status: activeCount === 0 ? 'CANCELLED' : activeCount >= READY_MEMBER_COUNT ? 'READY' : 'FORMING' } });
+      }
       return tx.autoGroup.findUnique({ where: { id: req.params.id }, ...includeMembers });
     });
     res.json({ success: true, message: 'You left the auto group.', data: group });
