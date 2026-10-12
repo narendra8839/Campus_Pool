@@ -38,15 +38,47 @@ const getTripDetails = (corridor, pickupHubId, destinationHubId) => {
   ) {
     fail(400, 'Choose two different stops on the selected route.');
   }
-  if (sequenceByHubId.get(pickupHubId) > sequenceByHubId.get(destinationHubId)) {
-    fail(400, 'Choose stops in the direction of travel on the selected route.');
-  }
+  const pickupSequence = sequenceByHubId.get(pickupHubId);
+  const destinationSequence = sequenceByHubId.get(destinationHubId);
 
   return {
     pickupName: corridor.hubs.find(({ hub }) => hub.id === pickupHubId).hub.name,
     destinationName: corridor.hubs.find(({ hub }) => hub.id === destinationHubId).hub.name,
+    pickupSequence,
+    destinationSequence,
+    direction: Math.sign(destinationSequence - pickupSequence),
     sequenceByHubId,
   };
+};
+
+const validatePickupAlongOrganizerRoute = (group, trip) => {
+  const organizerRequest = group.members.find(
+    ({ userId }) => userId === group.organizerId,
+  )?.request;
+  const organizerPickupSequence = organizerRequest
+    ? trip.sequenceByHubId.get(organizerRequest.pickupHubId)
+    : undefined;
+  const organizerDestinationSequence = organizerRequest
+    ? trip.sequenceByHubId.get(organizerRequest.destinationHubId)
+    : undefined;
+
+  if (
+    !Number.isInteger(organizerPickupSequence) ||
+    !Number.isInteger(organizerDestinationSequence)
+  ) {
+    fail(409, 'The organizer’s pickup stop is unavailable. Refresh and try again.');
+  }
+  const organizerDirection = Math.sign(
+    organizerDestinationSequence - organizerPickupSequence,
+  );
+  if (trip.direction !== organizerDirection) {
+    fail(400, 'Choose stops in the same direction as the organizer.');
+  }
+  if (
+    (trip.pickupSequence - organizerPickupSequence) * organizerDirection < 0
+  ) {
+    fail(400, 'Choose a pickup stop at or after the organizer’s pickup stop.');
+  }
 };
 
 const parseDepartureTime = (value) => {
@@ -231,6 +263,7 @@ const requestToJoinAutoGroup = async (req, res, next) => {
 
       const corridor = await getRouteStops(tx, group.corridorId);
       const trip = getTripDetails(corridor, pickupHubId, destinationHubId);
+      validatePickupAlongOrganizerRoute(group, trip);
       if (!hasSharedRouteSegment(
         [
           ...group.members.map(({ request }) => request),
@@ -330,6 +363,7 @@ const decideAutoGroupJoinRequest = async (req, res, next) => {
 
       const corridor = await getRouteStops(tx, group.corridorId);
       const trip = getTripDetails(corridor, request.pickupHubId, request.destinationHubId);
+      validatePickupAlongOrganizerRoute(group, trip);
       if (Math.abs(request.desiredDepartureTime.getTime() - group.departureTime.getTime()) > MATCH_WINDOW_MINUTES * 60000 ||
         !hasSharedRouteSegment(
           [

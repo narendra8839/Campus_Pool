@@ -107,13 +107,25 @@ test('creates a visible group listing with the organizer as its first member', a
   assert.equal(transactionOptions.timeout, 15000);
 });
 
-test('rejects a route that goes against corridor stop order', async () => {
+test('creates a group listing traveling in reverse along the corridor', async () => {
+  const calls = {};
   const tx = {
     autoGroupMember: { findFirst: async () => null },
     corridor: { findUnique: async () => corridor },
+    autoRequest: {
+      create: async ({ data }) => {
+        calls.request = data;
+        return { id: 'owner-request-1' };
+      },
+    },
+    autoGroup: {
+      create: async ({ data }) => {
+        calls.group = data;
+        return { id: 'group-1', ...data };
+      },
+    },
   };
   const response = mockResponse();
-  let nextError;
 
   await withTransactionMock((callback) => callback(tx), async () => {
     await createAutoGroupListing(
@@ -127,13 +139,15 @@ test('rejects a route that goes against corridor stop order', async () => {
         },
       },
       response,
-      (error) => { nextError = error; },
+      assert.fail,
     );
   });
 
-  assert.equal(response.statusCode, 400);
-  assert.equal(response.body.message, 'Choose stops in the direction of travel on the selected route.');
-  assert.equal(nextError, undefined);
+  assert.equal(response.statusCode, 201);
+  assert.equal(calls.request.pickupName, 'End');
+  assert.equal(calls.request.destinationName, 'Start');
+  assert.equal(calls.group.pickupName, 'End');
+  assert.equal(calls.group.destinationName, 'Start');
 });
 
 test('creates a pending join request for a compatible trip', async () => {
@@ -169,6 +183,176 @@ test('creates a pending join request for a compatible trip', async () => {
   assert.equal(response.body.data.status, 'PENDING');
   assert.equal(response.body.data.pickupName, 'Middle');
   assert.equal(response.body.data.destinationName, 'End');
+});
+
+test('rejects a join pickup before the organizer pickup stop', async () => {
+  const groupStartingAtMiddle = {
+    ...group,
+    members: [
+      {
+        userId: 'organizer-1',
+        request: { pickupHubId: 'hub-1', destinationHubId: 'hub-3' },
+      },
+    ],
+  };
+  const tx = {
+    autoGroup: { findUnique: async () => groupStartingAtMiddle },
+    autoGroupMember: { findFirst: async () => null },
+    corridor: { findUnique: async () => corridor },
+  };
+  const response = mockResponse();
+
+  await withTransactionMock((callback) => callback(tx), async () => {
+    await requestToJoinAutoGroup(
+      {
+        user: { id: 'student-2' },
+        params: { id: 'group-1' },
+        body: {
+          pickupHubId: 'hub-0',
+          destinationHubId: 'hub-3',
+          desiredDepartureTime: nowPlus(65).toISOString(),
+        },
+      },
+      response,
+      assert.fail,
+    );
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(
+    response.body.message,
+    'Choose a pickup stop at or after the organizer’s pickup stop.',
+  );
+});
+
+test('does not approve a pending join request with pickup before organizer', async () => {
+  const groupStartingAtMiddle = {
+    ...group,
+    members: [
+      {
+        userId: 'organizer-1',
+        request: { pickupHubId: 'hub-1', destinationHubId: 'hub-3' },
+      },
+    ],
+  };
+  const tx = {
+    autoGroup: { findUnique: async () => groupStartingAtMiddle },
+    autoGroupJoinRequest: {
+      findUnique: async () => ({
+        id: 'join-request-1',
+        groupId: 'group-1',
+        userId: 'student-2',
+        pickupHubId: 'hub-0',
+        destinationHubId: 'hub-3',
+        pickupName: 'Start',
+        destinationName: 'End',
+        desiredDepartureTime: nowPlus(65),
+        status: 'PENDING',
+      }),
+    },
+    autoGroupMember: { findFirst: async () => null },
+    corridor: { findUnique: async () => corridor },
+  };
+  const response = mockResponse();
+
+  await withTransactionMock((callback) => callback(tx), async () => {
+    await decideAutoGroupJoinRequest(
+      {
+        user: { id: 'organizer-1' },
+        params: { id: 'group-1', requestId: 'join-request-1' },
+        body: { decision: 'ACCEPT' },
+      },
+      response,
+      assert.fail,
+    );
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(
+    response.body.message,
+    'Choose a pickup stop at or after the organizer’s pickup stop.',
+  );
+});
+
+test('allows joining a reverse-direction group at or after organizer pickup', async () => {
+  const reverseGroup = {
+    ...group,
+    members: [
+      {
+        userId: 'organizer-1',
+        request: { pickupHubId: 'hub-3', destinationHubId: 'hub-0' },
+      },
+    ],
+  };
+  const tx = {
+    autoGroup: { findUnique: async () => reverseGroup },
+    autoGroupMember: { findFirst: async () => null },
+    corridor: { findUnique: async () => corridor },
+    autoGroupJoinRequest: {
+      findUnique: async () => null,
+      upsert: async ({ create }) => ({ id: 'join-request-1', status: 'PENDING', ...create }),
+    },
+  };
+  const response = mockResponse();
+
+  await withTransactionMock((callback) => callback(tx), async () => {
+    await requestToJoinAutoGroup(
+      {
+        user: { id: 'student-2' },
+        params: { id: 'group-1' },
+        body: {
+          pickupHubId: 'hub-2',
+          destinationHubId: 'hub-0',
+          desiredDepartureTime: nowPlus(65).toISOString(),
+        },
+      },
+      response,
+      assert.fail,
+    );
+  });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.body.data.pickupName, 'Near end');
+});
+
+test('rejects joining a reverse-direction group with a pickup before organizer', async () => {
+  const reverseGroup = {
+    ...group,
+    members: [
+      {
+        userId: 'organizer-1',
+        request: { pickupHubId: 'hub-2', destinationHubId: 'hub-0' },
+      },
+    ],
+  };
+  const tx = {
+    autoGroup: { findUnique: async () => reverseGroup },
+    autoGroupMember: { findFirst: async () => null },
+    corridor: { findUnique: async () => corridor },
+  };
+  const response = mockResponse();
+
+  await withTransactionMock((callback) => callback(tx), async () => {
+    await requestToJoinAutoGroup(
+      {
+        user: { id: 'student-2' },
+        params: { id: 'group-1' },
+        body: {
+          pickupHubId: 'hub-3',
+          destinationHubId: 'hub-0',
+          desiredDepartureTime: nowPlus(65).toISOString(),
+        },
+      },
+      response,
+      assert.fail,
+    );
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(
+    response.body.message,
+    'Choose a pickup stop at or after the organizer’s pickup stop.',
+  );
 });
 
 test('accepting a pending join request adds a member and updates group readiness', async () => {
@@ -246,4 +430,39 @@ test('my groups excludes cancelled listings', async () => {
 
   assert.deepEqual(query.where.status, { not: 'CANCELLED' });
   assert.equal(response.body.count, 0);
+});
+
+test('my groups includes pending join requests for group organizers', async () => {
+  const originalFindMany = prisma.autoGroup.findMany;
+  const pendingRequest = {
+    id: 'join-request-1',
+    userId: 'student-2',
+    status: 'PENDING',
+    user: { id: 'student-2', name: 'Student Two', avatar: null },
+  };
+  prisma.autoGroup.findMany = async (args) => {
+    assert.deepEqual(args.include.joinRequests.where, {
+      status: { in: ['PENDING', 'DECLINED'] },
+    });
+    return [{
+      id: 'group-1',
+      organizerId: 'organizer-1',
+      members: [{ userId: 'organizer-1', status: 'JOINED' }],
+      joinRequests: [pendingRequest],
+    }];
+  };
+  const response = mockResponse();
+
+  try {
+    await getMyAutoGroups(
+      { user: { id: 'organizer-1' } },
+      response,
+      assert.fail,
+    );
+  } finally {
+    prisma.autoGroup.findMany = originalFindMany;
+  }
+
+  assert.equal(response.body.data[0].isOrganizer, true);
+  assert.deepEqual(response.body.data[0].joinRequests, [pendingRequest]);
 });

@@ -189,6 +189,9 @@ class _AutoGroupsScreenState extends State<AutoGroupsScreen>
     Map<String, dynamic>? organizerRequest;
     for (final item in members) {
       if (item is Map<String, dynamic> &&
+          item['user'] is Map<String, dynamic> &&
+          (item['user'] as Map<String, dynamic>)['id']?.toString() ==
+              group['organizerId']?.toString() &&
           item['request'] is Map<String, dynamic>) {
         organizerRequest = item['request'] as Map<String, dynamic>;
         break;
@@ -349,7 +352,7 @@ class _AutoGroupCard extends StatelessWidget {
     )?.toLocal();
     final isReady = status == 'READY' || status == 'CONFIRMED';
     final corridor = group['corridor'] as Map<String, dynamic>?;
-    final groupJoinRequests = marketplace ? joinRequests : const <dynamic>[];
+    final groupJoinRequests = isOrganizer ? joinRequests : const <dynamic>[];
     final myJoinRequest = group['myJoinRequest'] as Map<String, dynamic>?;
     final myJoinStatus = marketplace && joinRequests.isNotEmpty
         ? (joinRequests.first as Map<String, dynamic>)['status']?.toString()
@@ -586,12 +589,19 @@ class _AutoGroupRequestSheetState extends State<_AutoGroupRequestSheet> {
           ? null
           : _hubById(corridor.hubs, widget.initialPickupHubId) ??
                 corridor.hubs.first;
+      final initialDestination = corridor == null
+          ? null
+          : _hubById(corridor.hubs, widget.initialDestinationHubId);
       final destination = corridor == null
           ? null
-          : _hubById(corridor.hubs, widget.initialDestinationHubId) ??
-                corridor.hubs
-                    .where((hub) => hub.sequence > pickup!.sequence)
-                    .first;
+          : initialDestination ??
+                corridor.hubs.firstWhere(
+                  (hub) =>
+                      hub.sequence != pickup!.sequence &&
+                      (pickup.sequence == corridor.hubs.last.sequence
+                          ? hub.sequence < pickup.sequence
+                          : hub.sequence > pickup.sequence),
+                );
       setState(() {
         _corridors = corridors;
         _selectedCorridor = corridor;
@@ -650,14 +660,50 @@ class _AutoGroupRequestSheetState extends State<_AutoGroupRequestSheet> {
   Widget build(BuildContext context) {
     final corridor = _selectedCorridor;
     final pickup = _selectedPickup;
+    final organizerPickupSequence = corridor == null
+        ? null
+        : _hubById(corridor.hubs, widget.initialPickupHubId)?.sequence;
+    final organizerDestinationSequence = corridor == null
+        ? null
+        : _hubById(corridor.hubs, widget.initialDestinationHubId)?.sequence;
+    final organizerDirection =
+        organizerPickupSequence == null || organizerDestinationSequence == null
+        ? 0
+        : (organizerDestinationSequence - organizerPickupSequence).sign;
+    final hasOrganizerRoute =
+        organizerPickupSequence != null &&
+        organizerDestinationSequence != null &&
+        organizerDirection != 0;
     final availablePickups =
         corridor?.hubs
-            .where((hub) => hub.sequence < corridor.hubs.last.sequence)
+            .where(
+              (hub) =>
+                  widget.initialCorridorId == null ||
+                  (hasOrganizerRoute &&
+                      (hub.sequence - organizerPickupSequence) *
+                              organizerDirection >=
+                          0 &&
+                      (hub.sequence - organizerDestinationSequence) *
+                              organizerDirection <=
+                          0),
+            )
             .toList() ??
         const <HubModel>[];
     final availableDestinations =
         corridor?.hubs
-            .where((hub) => hub.sequence > (pickup?.sequence ?? -1))
+            .where(
+              (hub) =>
+                  pickup != null &&
+                  hub.sequence != pickup.sequence &&
+                  (widget.initialCorridorId == null ||
+                      (hasOrganizerRoute &&
+                          (hub.sequence - pickup.sequence) *
+                                  organizerDirection >
+                              0 &&
+                          (hub.sequence - organizerDestinationSequence) *
+                                  organizerDirection <=
+                              0)),
+            )
             .toList() ??
         const <HubModel>[];
 
@@ -755,10 +801,13 @@ class _AutoGroupRequestSheetState extends State<_AutoGroupRequestSheet> {
                   );
                   setState(() {
                     _selectedPickup = selected;
-                    if ((_selectedDestination?.sequence ?? -1) <=
-                        selected.sequence) {
+                    if (_selectedDestination?.sequence == selected.sequence) {
                       _selectedDestination = corridor.hubs.firstWhere(
-                        (hub) => hub.sequence > selected.sequence,
+                        (hub) =>
+                            hub.sequence != selected.sequence &&
+                            (selected.sequence == corridor.hubs.last.sequence
+                                ? hub.sequence < selected.sequence
+                                : hub.sequence > selected.sequence),
                       );
                     }
                   });
