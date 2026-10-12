@@ -118,7 +118,10 @@ class _AutoGroupsScreenState extends State<AutoGroupsScreen>
       );
       await _loadGroups();
     } catch (error) {
-      if (mounted) _showMessage(error.toString(), isError: true);
+      if (mounted) {
+        await _loadGroups();
+        if (mounted) _showMessage(error.toString(), isError: true);
+      }
     }
   }
 
@@ -156,7 +159,10 @@ class _AutoGroupsScreenState extends State<AutoGroupsScreen>
       _showMessage(_responseMessage(response, 'Join request updated.'));
       await _loadGroups();
     } catch (error) {
-      if (mounted) _showMessage(error.toString(), isError: true);
+      if (mounted) {
+        await _loadGroups();
+        if (mounted) _showMessage(error.toString(), isError: true);
+      }
     }
   }
 

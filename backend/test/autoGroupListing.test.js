@@ -61,6 +61,7 @@ test('creates a visible group listing with the organizer as its first member', a
   const calls = {};
   const tx = {
     autoGroupMember: { findFirst: async () => null },
+    autoGroupJoinRequest: { updateMany: async () => ({ count: 0 }) },
     corridor: { findUnique: async () => corridor },
     autoRequest: {
       create: async ({ data }) => {
@@ -111,6 +112,7 @@ test('creates a group listing traveling in reverse along the corridor', async ()
   const calls = {};
   const tx = {
     autoGroupMember: { findFirst: async () => null },
+    autoGroupJoinRequest: { updateMany: async () => ({ count: 0 }) },
     corridor: { findUnique: async () => corridor },
     autoRequest: {
       create: async ({ data }) => {
@@ -148,6 +150,53 @@ test('creates a group listing traveling in reverse along the corridor', async ()
   assert.equal(calls.request.destinationName, 'Start');
   assert.equal(calls.group.pickupName, 'End');
   assert.equal(calls.group.destinationName, 'Start');
+});
+
+test('withdraws pending join requests when requester creates a group', async () => {
+  const calls = {};
+  const tx = {
+    autoGroupMember: { findFirst: async () => null },
+    autoGroupJoinRequest: {
+      updateMany: async ({ where, data }) => {
+        calls.withdraw = { where, data };
+        return { count: 1 };
+      },
+    },
+    corridor: { findUnique: async () => corridor },
+    autoRequest: {
+      create: async () => ({ id: 'owner-request-1' }),
+    },
+    autoGroup: {
+      create: async ({ data }) => ({ id: 'group-1', ...data }),
+    },
+  };
+  const response = mockResponse();
+
+  await withTransactionMock((callback) => callback(tx), async () => {
+    await createAutoGroupListing(
+      {
+        user: { id: 'student-2' },
+        body: {
+          corridorId: 'corridor-1',
+          pickupHubId: 'hub-0',
+          destinationHubId: 'hub-3',
+          desiredDepartureTime: nowPlus(60).toISOString(),
+        },
+      },
+      response,
+      assert.fail,
+    );
+  });
+
+  assert.equal(response.statusCode, 201);
+  assert.deepEqual(calls.withdraw, {
+    where: { userId: 'student-2', status: 'PENDING' },
+    data: { status: 'WITHDRAWN' },
+  });
+  assert.equal(
+    response.body.message,
+    'Your auto group is listed. Your pending join requests were withdrawn.',
+  );
 });
 
 test('creates a pending join request for a compatible trip', async () => {
@@ -409,6 +458,51 @@ test('accepting a pending join request adds a member and updates group readiness
   assert.equal(calls.withdraw.data.status, 'WITHDRAWN');
 });
 
+test('withdraws a pending request if the requester joined another active group', async () => {
+  const calls = {};
+  const tx = {
+    autoGroup: { findUnique: async () => group },
+    autoGroupJoinRequest: {
+      findUnique: async () => ({
+        id: 'join-request-1',
+        groupId: 'group-1',
+        userId: 'student-3',
+        pickupHubId: 'hub-1',
+        destinationHubId: 'hub-3',
+        pickupName: 'Middle',
+        destinationName: 'End',
+        desiredDepartureTime: nowPlus(65),
+        status: 'PENDING',
+      }),
+      update: async ({ data }) => {
+        calls.requestUpdate = data;
+        return { id: 'join-request-1', ...data };
+      },
+    },
+    autoGroupMember: {
+      findFirst: async () => ({ groupId: 'another-group' }),
+    },
+  };
+  const response = mockResponse();
+
+  await withTransactionMock((callback) => callback(tx), async () => {
+    await decideAutoGroupJoinRequest(
+      {
+        user: { id: 'organizer-1' },
+        params: { id: 'group-1', requestId: 'join-request-1' },
+        body: { decision: 'ACCEPT' },
+      },
+      response,
+      assert.fail,
+    );
+  });
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.body.data.status, 'WITHDRAWN');
+  assert.equal(calls.requestUpdate.status, 'WITHDRAWN');
+  assert.match(response.body.message, /already in another active auto group/);
+});
+
 test('my groups excludes cancelled listings', async () => {
   const originalFindMany = prisma.autoGroup.findMany;
   let query;
@@ -434,6 +528,7 @@ test('my groups excludes cancelled listings', async () => {
 
 test('my groups includes pending join requests for group organizers', async () => {
   const originalFindMany = prisma.autoGroup.findMany;
+  const originalMemberFindMany = prisma.autoGroupMember.findMany;
   const pendingRequest = {
     id: 'join-request-1',
     userId: 'student-2',
@@ -451,6 +546,7 @@ test('my groups includes pending join requests for group organizers', async () =
       joinRequests: [pendingRequest],
     }];
   };
+  prisma.autoGroupMember.findMany = async () => [];
   const response = mockResponse();
 
   try {
@@ -461,8 +557,45 @@ test('my groups includes pending join requests for group organizers', async () =
     );
   } finally {
     prisma.autoGroup.findMany = originalFindMany;
+    prisma.autoGroupMember.findMany = originalMemberFindMany;
   }
 
   assert.equal(response.body.data[0].isOrganizer, true);
   assert.deepEqual(response.body.data[0].joinRequests, [pendingRequest]);
+});
+
+test('hides pending requests from organizers when requester has another active group', async () => {
+  const originalFindMany = prisma.autoGroup.findMany;
+  const originalMemberFindMany = prisma.autoGroupMember.findMany;
+  const pendingRequest = {
+    id: 'join-request-1',
+    userId: 'student-2',
+    status: 'PENDING',
+    user: { id: 'student-2', name: 'Student Two', avatar: null },
+  };
+  prisma.autoGroup.findMany = async () => [{
+    id: 'group-1',
+    organizerId: 'organizer-1',
+    members: [{ userId: 'organizer-1', status: 'JOINED' }],
+    joinRequests: [pendingRequest],
+  }];
+  prisma.autoGroupMember.findMany = async ({ where }) => {
+    assert.deepEqual(where.userId.in, ['student-2']);
+    return [{ userId: 'student-2' }];
+  };
+  const response = mockResponse();
+
+  try {
+    await getMyAutoGroups(
+      { user: { id: 'organizer-1' } },
+      response,
+      assert.fail,
+    );
+  } finally {
+    prisma.autoGroup.findMany = originalFindMany;
+    prisma.autoGroupMember.findMany = originalMemberFindMany;
+  }
+
+  assert.equal(response.body.data.length, 1);
+  assert.deepEqual(response.body.data[0].joinRequests, []);
 });

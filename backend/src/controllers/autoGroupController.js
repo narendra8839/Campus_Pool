@@ -189,24 +189,60 @@ const getMyAutoGroups = async (req, res, next) => {
       },
       orderBy: { departureTime: 'asc' },
     });
-    const visibleGroups = groups.map((group) => {
-      const isOrganizer = group.organizerId === req.user.id;
-      const myJoinRequest = group.joinRequests.find(
-        (request) => request.userId === req.user.id,
-      ) ?? null;
-      return {
-        ...group,
-        isOrganizer,
-        isMember: group.members.some(
+    const pendingRequesterIds = [...new Set(
+      groups.flatMap((group) =>
+        group.joinRequests
+          .filter((request) => request.status === 'PENDING')
+          .map((request) => request.userId),
+      ),
+    )];
+    const activeMemberships = pendingRequesterIds.length === 0
+      ? []
+      : await prisma.autoGroupMember.findMany({
+        where: {
+          userId: { in: pendingRequesterIds },
+          status: { in: ['JOINED', 'CONFIRMED'] },
+        },
+        select: { userId: true },
+      });
+    const activeMemberIds = new Set(activeMemberships.map(({ userId }) => userId));
+    const visibleGroups = groups
+      .filter((group) => {
+        const isOrganizer = group.organizerId === req.user.id;
+        const isMember = group.members.some(
           (member) =>
             member.userId === req.user.id && member.status !== 'LEFT',
-        ),
-        myJoinRequest,
-        joinRequests: isOrganizer
-          ? group.joinRequests.filter((request) => request.status === 'PENDING')
-          : [],
-      };
-    });
+        );
+        const hasActionableRequest = group.joinRequests.some(
+          (request) =>
+            request.userId === req.user.id &&
+            !activeMemberIds.has(request.userId),
+        );
+        return isOrganizer || isMember || hasActionableRequest;
+      })
+      .map((group) => {
+        const isOrganizer = group.organizerId === req.user.id;
+        const eligibleJoinRequests = group.joinRequests.filter(
+          (request) => !activeMemberIds.has(request.userId),
+        );
+        const myJoinRequest = eligibleJoinRequests.find(
+          (request) => request.userId === req.user.id,
+        ) ?? null;
+        return {
+          ...group,
+          isOrganizer,
+          isMember: group.members.some(
+            (member) =>
+              member.userId === req.user.id && member.status !== 'LEFT',
+          ),
+          myJoinRequest,
+          joinRequests: isOrganizer
+            ? eligibleJoinRequests.filter(
+                (request) => request.status === 'PENDING',
+              )
+            : [],
+        };
+      });
     res.json({ success: true, count: visibleGroups.length, data: visibleGroups });
   } catch (error) { next(error); }
 };

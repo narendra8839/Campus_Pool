@@ -128,14 +128,13 @@ const createAutoGroupListing = async (req, res, next) => {
     }
     const departureTime = parseDepartureTime(desiredDepartureTime);
 
-    const group = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const existingMembership = await tx.autoGroupMember.findFirst({
         where: { userId: req.user.id, status: { in: ACTIVE_MEMBER_STATUSES } },
       });
       if (existingMembership) {
         fail(409, 'Leave your current auto group before creating another group.');
       }
-
       const corridor = await getRouteStops(tx, corridorId);
       const trip = getTripDetails(corridor, pickupHubId, destinationHubId);
       const request = await tx.autoRequest.create({
@@ -169,10 +168,20 @@ const createAutoGroupListing = async (req, res, next) => {
         },
         include: groupListingInclude,
       });
-      return created;
+      const withdrawnJoinRequests = await tx.autoGroupJoinRequest.updateMany({
+        where: { userId: req.user.id, status: 'PENDING' },
+        data: { status: 'WITHDRAWN' },
+      });
+      return { group: created, withdrawnJoinRequests: withdrawnJoinRequests.count };
     }, INTERACTIVE_TRANSACTION_OPTIONS);
 
-    res.status(201).json({ success: true, message: 'Your auto group is now listed.', data: group });
+    res.status(201).json({
+      success: true,
+      message: result.withdrawnJoinRequests > 0
+        ? 'Your auto group is listed. Your pending join requests were withdrawn.'
+        : 'Your auto group is now listed.',
+      data: result.group,
+    });
   } catch (error) {
     if (error.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
     if (error.code === 'P2034') {
@@ -345,11 +354,13 @@ const decideAutoGroupJoinRequest = async (req, res, next) => {
       if (!request || request.groupId !== group.id) fail(404, 'Join request not found.');
       if (request.status !== 'PENDING') fail(409, 'This join request has already been handled.');
       if (decision === 'DECLINE') {
-        return tx.autoGroupJoinRequest.update({
-          where: { id: request.id },
-          data: { status: 'DECLINED' },
-          include: { user: { select: { id: true, name: true, avatar: true } } },
-        });
+        return {
+          request: await tx.autoGroupJoinRequest.update({
+            where: { id: request.id },
+            data: { status: 'DECLINED' },
+            include: { user: { select: { id: true, name: true, avatar: true } } },
+          }),
+        };
       }
 
       if (!OPEN_GROUP_STATUSES.includes(group.status) || group.departureTime <= new Date()) {
@@ -359,7 +370,14 @@ const decideAutoGroupJoinRequest = async (req, res, next) => {
       const activeMembership = await tx.autoGroupMember.findFirst({
         where: { userId: request.userId, status: { in: ACTIVE_MEMBER_STATUSES } },
       });
-      if (activeMembership) fail(409, 'This student is already in another active auto group.');
+      if (activeMembership) {
+        const withdrawnRequest = await tx.autoGroupJoinRequest.update({
+          where: { id: request.id },
+          data: { status: 'WITHDRAWN' },
+          include: { user: { select: { id: true, name: true, avatar: true } } },
+        });
+        return { conflict: true, request: withdrawnRequest };
+      }
 
       const corridor = await getRouteStops(tx, group.corridorId);
       const trip = getTripDetails(corridor, request.pickupHubId, request.destinationHubId);
@@ -402,20 +420,29 @@ const decideAutoGroupJoinRequest = async (req, res, next) => {
         },
         data: { status: 'WITHDRAWN' },
       });
-      return tx.autoGroupJoinRequest.update({
-        where: { id: request.id },
-        data: { status: 'ACCEPTED' },
-        include: { user: { select: { id: true, name: true, avatar: true } } },
-      });
+      return {
+        request: await tx.autoGroupJoinRequest.update({
+          where: { id: request.id },
+          data: { status: 'ACCEPTED' },
+          include: { user: { select: { id: true, name: true, avatar: true } } },
+        }),
+      };
     }, {
       ...INTERACTIVE_TRANSACTION_OPTIONS,
       isolationLevel: 'Serializable',
     });
 
+    if (result.conflict) {
+      return res.status(409).json({
+        success: false,
+        message: 'This request was withdrawn because the student is already in another active auto group.',
+        data: result.request,
+      });
+    }
     res.json({
       success: true,
       message: decision === 'ACCEPT' ? 'Student added to your auto group.' : 'Join request declined.',
-      data: result,
+      data: result.request,
     });
   } catch (error) {
     if (error.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
