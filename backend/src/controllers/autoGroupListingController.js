@@ -5,6 +5,7 @@ const ACTIVE_MEMBER_STATUSES = ['JOINED', 'CONFIRMED'];
 const OPEN_GROUP_STATUSES = ['FORMING', 'READY'];
 const READY_MEMBER_COUNT = 3;
 const MATCH_WINDOW_MINUTES = 15;
+const INTERACTIVE_TRANSACTION_OPTIONS = { maxWait: 10000, timeout: 15000 };
 
 const fail = (statusCode, message) => {
   const error = new Error(message);
@@ -137,11 +138,14 @@ const createAutoGroupListing = async (req, res, next) => {
         include: groupListingInclude,
       });
       return created;
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
 
     res.status(201).json({ success: true, message: 'Your auto group is now listed.', data: group });
   } catch (error) {
     if (error.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
+    if (error.code === 'P2034') {
+      return res.status(409).json({ success: false, message: 'Your group could not be listed because your membership changed. Please refresh and try again.' });
+    }
     next(error);
   }
 };
@@ -264,7 +268,10 @@ const requestToJoinAutoGroup = async (req, res, next) => {
         },
       });
       return request;
-    }, { isolationLevel: 'Serializable' });
+    }, {
+      ...INTERACTIVE_TRANSACTION_OPTIONS,
+      isolationLevel: 'Serializable',
+    });
 
     res.status(201).json({
       success: true,
@@ -366,7 +373,10 @@ const decideAutoGroupJoinRequest = async (req, res, next) => {
         data: { status: 'ACCEPTED' },
         include: { user: { select: { id: true, name: true, avatar: true } } },
       });
-    }, { isolationLevel: 'Serializable' });
+    }, {
+      ...INTERACTIVE_TRANSACTION_OPTIONS,
+      isolationLevel: 'Serializable',
+    });
 
     res.json({
       success: true,

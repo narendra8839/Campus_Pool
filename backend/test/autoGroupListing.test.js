@@ -6,6 +6,7 @@ const {
   decideAutoGroupJoinRequest,
   requestToJoinAutoGroup,
 } = require('../src/controllers/autoGroupListingController');
+const { getMyAutoGroups } = require('../src/controllers/autoGroupController');
 
 const nowPlus = (minutes) => new Date(Date.now() + minutes * 60 * 1000);
 
@@ -75,8 +76,12 @@ test('creates a visible group listing with the organizer as its first member', a
     },
   };
   const response = mockResponse();
+  let transactionOptions;
 
-  await withTransactionMock((callback) => callback(tx), async () => {
+  await withTransactionMock((callback, options) => {
+    transactionOptions = options;
+    return callback(tx);
+  }, async () => {
     await createAutoGroupListing(
       {
         user: { id: 'organizer-1' },
@@ -98,6 +103,8 @@ test('creates a visible group listing with the organizer as its first member', a
   assert.equal(calls.group.status, 'FORMING');
   assert.equal(calls.group.members.create.userId, 'organizer-1');
   assert.equal(calls.request.status, 'MATCHED');
+  assert.equal(transactionOptions.maxWait, 10000);
+  assert.equal(transactionOptions.timeout, 15000);
 });
 
 test('rejects a route that goes against corridor stop order', async () => {
@@ -216,4 +223,27 @@ test('accepting a pending join request adds a member and updates group readiness
   assert.equal(calls.member.requestId, 'accepted-request-1');
   assert.equal(calls.groupUpdate.status, 'READY');
   assert.equal(calls.withdraw.data.status, 'WITHDRAWN');
+});
+
+test('my groups excludes cancelled listings', async () => {
+  const originalFindMany = prisma.autoGroup.findMany;
+  let query;
+  prisma.autoGroup.findMany = async (args) => {
+    query = args;
+    return [];
+  };
+  const response = mockResponse();
+
+  try {
+    await getMyAutoGroups(
+      { user: { id: 'organizer-1' } },
+      response,
+      assert.fail,
+    );
+  } finally {
+    prisma.autoGroup.findMany = originalFindMany;
+  }
+
+  assert.deepEqual(query.where.status, { not: 'CANCELLED' });
+  assert.equal(response.body.count, 0);
 });

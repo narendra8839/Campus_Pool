@@ -14,16 +14,25 @@ class AutoGroupsScreen extends StatefulWidget {
   State<AutoGroupsScreen> createState() => _AutoGroupsScreenState();
 }
 
-class _AutoGroupsScreenState extends State<AutoGroupsScreen> {
+class _AutoGroupsScreenState extends State<AutoGroupsScreen>
+    with SingleTickerProviderStateMixin {
   List<dynamic> _browseGroups = [];
   List<dynamic> _myGroups = [];
   bool _isLoading = true;
   String? _loadError;
+  late final TabController _tabController;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _loadGroups();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadGroups() async {
@@ -78,7 +87,7 @@ class _AutoGroupsScreenState extends State<AutoGroupsScreen> {
       Navigator.pop(context);
       _showMessage(_responseMessage(response, 'Your group is now listed.'));
       await _loadGroups();
-      if (mounted) DefaultTabController.of(context).animateTo(1);
+      if (mounted) _tabController.animateTo(1);
     } catch (error) {
       if (mounted) _showMessage(error.toString(), isError: true);
     }
@@ -212,38 +221,36 @@ class _AutoGroupsScreenState extends State<AutoGroupsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Auto Groups'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Browse groups'),
-              Tab(text: 'My groups'),
-            ],
-          ),
-        ),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: _showCreateGroupSheet,
-          icon: const Icon(Icons.group_add_rounded),
-          label: const Text('Create group'),
-        ),
-        body: TabBarView(
-          children: [
-            _buildGroupList(
-              _browseGroups,
-              emptyMessage:
-                  'No open auto groups yet. Create one to get started.',
-              marketplace: true,
-            ),
-            _buildGroupList(
-              _myGroups,
-              emptyMessage: 'You have not joined or created an auto group yet.',
-              marketplace: false,
-            ),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Auto Groups'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'Browse groups'),
+            Tab(text: 'My groups'),
           ],
         ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showCreateGroupSheet,
+        icon: const Icon(Icons.group_add_rounded),
+        label: const Text('Create group'),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildGroupList(
+            _browseGroups,
+            emptyMessage: 'No open auto groups yet. Create one to get started.',
+            marketplace: true,
+          ),
+          _buildGroupList(
+            _myGroups,
+            emptyMessage: 'You have not joined or created an auto group yet.',
+            marketplace: false,
+          ),
+        ],
       ),
     );
   }
@@ -698,12 +705,17 @@ class _AutoGroupRequestSheetState extends State<_AutoGroupRequestSheet> {
             else ...[
               DropdownButtonFormField<String>(
                 value: corridor?.id,
+                isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Route'),
                 items: _corridors
                     .map(
                       (item) => DropdownMenuItem(
                         value: item.id,
-                        child: Text(item.name),
+                        child: Text(
+                          item.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     )
                     .toList(),
@@ -723,12 +735,17 @@ class _AutoGroupRequestSheetState extends State<_AutoGroupRequestSheet> {
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 value: pickup?.id,
+                isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Pickup stop'),
                 items: availablePickups
                     .map(
                       (hub) => DropdownMenuItem(
                         value: hub.id,
-                        child: Text(hub.name),
+                        child: Text(
+                          hub.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     )
                     .toList(),
@@ -750,12 +767,17 @@ class _AutoGroupRequestSheetState extends State<_AutoGroupRequestSheet> {
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 value: _selectedDestination?.id,
+                isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Drop-off stop'),
                 items: availableDestinations
                     .map(
                       (hub) => DropdownMenuItem(
                         value: hub.id,
-                        child: Text(hub.name),
+                        child: Text(
+                          hub.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     )
                     .toList(),
@@ -769,6 +791,7 @@ class _AutoGroupRequestSheetState extends State<_AutoGroupRequestSheet> {
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
                   value: _maxMembers,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Group size'),
                   items: const [3, 4]
                       .map(

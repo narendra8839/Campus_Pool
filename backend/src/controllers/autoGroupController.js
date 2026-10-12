@@ -164,6 +164,7 @@ const getMyAutoGroups = async (req, res, next) => {
   try {
     const groups = await prisma.autoGroup.findMany({
       where: {
+        status: { not: 'CANCELLED' },
         OR: [
           { members: { some: { userId: req.user.id, status: { not: 'LEFT' } } } },
           { organizerId: req.user.id },
