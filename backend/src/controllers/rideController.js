@@ -13,6 +13,8 @@ const routeInclude = {
   destinationHub: true,
 };
 
+const RIDE_GENDER_PREFERENCES = new Set(['any', 'male', 'female', 'other']);
+
 // @desc    Create / Offer a new ride
 // @route   POST /api/rides
 // @access  Private
@@ -33,7 +35,10 @@ const createRide = async (req, res, next) => {
       vehicleType,
       helmetProvided,
       contribution,
+      passengerGenderPreference = 'any',
       notes,
+      viaPoints = [],
+      selectedRouteIndex = 0,
       corridorId,
       originHubId,
       destinationHubId,
@@ -59,6 +64,16 @@ const createRide = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: 'Only bike and scooty vehicles are supported',
+      });
+    }
+
+    const normalizedPassengerGenderPreference = String(
+      passengerGenderPreference,
+    ).toLowerCase();
+    if (!RIDE_GENDER_PREFERENCES.has(normalizedPassengerGenderPreference)) {
+      return res.status(400).json({
+        success: false,
+        message: 'passengerGenderPreference must be any, male, female, or other',
       });
     }
 
@@ -118,9 +133,97 @@ const createRide = async (req, res, next) => {
       }
     }
 
+    const parseCoordinate = (value) => {
+      if (typeof value === 'number') return value;
+      if (typeof value === 'string' && value.trim() !== '') return Number(value);
+      return Number.NaN;
+    };
+    const parsedOriginLat = parseCoordinate(originLat);
+    const parsedOriginLng = parseCoordinate(originLng);
+    const parsedDestinationLat = parseCoordinate(destLat);
+    const parsedDestinationLng = parseCoordinate(destLng);
+    const coordinatesAreValid =
+      Number.isFinite(parsedOriginLat) &&
+      parsedOriginLat >= -90 &&
+      parsedOriginLat <= 90 &&
+      Number.isFinite(parsedDestinationLat) &&
+      parsedDestinationLat >= -90 &&
+      parsedDestinationLat <= 90 &&
+      Number.isFinite(parsedOriginLng) &&
+      parsedOriginLng >= -180 &&
+      parsedOriginLng <= 180 &&
+      Number.isFinite(parsedDestinationLng) &&
+      parsedDestinationLng >= -180 &&
+      parsedDestinationLng <= 180;
+    if (
+      !coordinatesAreValid ||
+      (parsedOriginLat === 0 &&
+        parsedOriginLng === 0 &&
+        parsedDestinationLat === 0 &&
+        parsedDestinationLng === 0)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid start and destination coordinates are required.',
+      });
+    }
+    if (
+      parsedOriginLat === parsedDestinationLat &&
+      parsedOriginLng === parsedDestinationLng
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Start and destination must be different locations.',
+      });
+    }
+
+    if (!Array.isArray(viaPoints) || viaPoints.length > 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'At most one valid route via point may be provided.',
+      });
+    }
+    const parsedViaPoints = viaPoints.map((point) => ({
+      latitude: parseCoordinate(point?.latitude),
+      longitude: parseCoordinate(point?.longitude),
+    }));
+    if (
+      parsedViaPoints.some(
+        ({ latitude, longitude }) =>
+          !Number.isFinite(latitude) ||
+          latitude < -90 ||
+          latitude > 90 ||
+          !Number.isFinite(longitude) ||
+          longitude < -180 ||
+          longitude > 180,
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'The route via point must have valid coordinates.',
+      });
+    }
+
+    const parsedRouteIndex = Number(selectedRouteIndex);
+    if (
+      !Number.isInteger(parsedRouteIndex) ||
+      parsedRouteIndex < 0 ||
+      parsedRouteIndex > 2
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'selectedRouteIndex must be 0, 1, or 2.',
+      });
+    }
+
     const pricing = await priceRide({
-      origin: { latitude: originLat, longitude: originLng },
-      destination: { latitude: destLat, longitude: destLng },
+      origin: { latitude: parsedOriginLat, longitude: parsedOriginLng },
+      destination: {
+        latitude: parsedDestinationLat,
+        longitude: parsedDestinationLng,
+      },
+      viaPoints: parsedViaPoints,
+      selectedRouteIndex: parsedRouteIndex,
       waypoints,
     });
 
@@ -130,12 +233,12 @@ const createRide = async (req, res, next) => {
         ...routeLinks,
         originName,
         originAddress: originAddress || '',
-        originLat: parseFloat(originLat) || 0.0,
-        originLng: parseFloat(originLng) || 0.0,
+        originLat: parsedOriginLat,
+        originLng: parsedOriginLng,
         destName,
         destAddress: destAddress || '',
-        destLat: parseFloat(destLat) || 0.0,
-        destLng: parseFloat(destLng) || 0.0,
+        destLat: parsedDestinationLat,
+        destLng: parsedDestinationLng,
         waypoints: pricing.waypoints,
         departureTime: depDate,
         totalSeats: seats,
@@ -143,6 +246,7 @@ const createRide = async (req, res, next) => {
         vehicleType: normalizedVehicleType,
         helmetProvided: helmetProvided !== undefined ? helmetProvided : req.user.helmetProvided ?? true,
         contribution: pricing.contribution,
+        passengerGenderPreference: normalizedPassengerGenderPreference,
         notes: notes || '',
       },
       include: {
@@ -154,6 +258,8 @@ const createRide = async (req, res, next) => {
             phone: true,
             ratingAvg: true,
             ratingCount: true,
+            gender: true,
+            isVerified: true,
             avatar: true,
             college: true,
             rollNumber: true,
@@ -191,6 +297,7 @@ const searchRides = async (req, res, next) => {
       to,
       date,
       vehicleType,
+      driverGender,
       seats = 1,
       page = 1,
       limit = 20,
@@ -205,6 +312,23 @@ const searchRides = async (req, res, next) => {
       availableSeats: { gte: parseInt(seats, 10) },
       driverId: { not: req.user.id },
     };
+
+    const seekerGender = req.user.gender?.toLowerCase();
+    where.OR = [{ passengerGenderPreference: 'any' }];
+    if (RIDE_GENDER_PREFERENCES.has(seekerGender)) {
+      where.OR.push({ passengerGenderPreference: seekerGender });
+    }
+
+    const normalizedDriverGender = String(driverGender || '').toLowerCase();
+    if (normalizedDriverGender && normalizedDriverGender !== 'any') {
+      if (!RIDE_GENDER_PREFERENCES.has(normalizedDriverGender)) {
+        return res.status(400).json({
+          success: false,
+          message: 'driverGender must be any, male, female, or other',
+        });
+      }
+      where.driver = { is: { gender: normalizedDriverGender } };
+    }
 
     if (from) {
       where.originName = { contains: from, mode: 'insensitive' };
@@ -254,11 +378,13 @@ const searchRides = async (req, res, next) => {
               id: true,
               name: true,
               phone: true,
-              ratingAvg: true,
-              ratingCount: true,
               avatar: true,
               college: true,
               rollNumber: true,
+              gender: true,
+              ratingAvg: true,
+              ratingCount: true,
+              isVerified: true,
               vehicleType: true,
               vehicleModel: true,
             },
@@ -301,6 +427,8 @@ const getRideById = async (req, res, next) => {
             phone: true,
             ratingAvg: true,
             ratingCount: true,
+            gender: true,
+            isVerified: true,
             avatar: true,
             college: true,
             rollNumber: true,
@@ -321,6 +449,11 @@ const getRideById = async (req, res, next) => {
                 avatar: true,
                 ratingAvg: true,
                 rollNumber: true,
+                gender: true,
+                ratingCount: true,
+                isVerified: true,
+                college: true,
+                emergencyPhone: true,
               },
             },
           },
@@ -356,7 +489,19 @@ const getMyOfferedRides = async (req, res, next) => {
         bookings: {
           include: {
             passenger: {
-              select: { id: true, name: true, phone: true, avatar: true },
+              select: {
+                id: true,
+                name: true,
+                phone: true,
+                avatar: true,
+                gender: true,
+                ratingAvg: true,
+                ratingCount: true,
+                isVerified: true,
+                college: true,
+                rollNumber: true,
+                emergencyPhone: true,
+              },
             },
           },
         },

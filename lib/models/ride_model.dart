@@ -17,12 +17,14 @@ class RideModel {
   final String destAddress;
   final double destLat;
   final double destLng;
+  final List<List<double>> routeCoordinates;
   final DateTime departureTime;
   final int totalSeats;
   final int availableSeats;
   final String vehicleType;
   final bool helmetProvided;
   final double contribution;
+  final String passengerGenderPreference;
   final double? matchAcceptanceProbability;
   final String notes;
   final String status;
@@ -45,12 +47,14 @@ class RideModel {
     this.destAddress = '',
     this.destLat = 0.0,
     this.destLng = 0.0,
+    this.routeCoordinates = const [],
     required this.departureTime,
     this.totalSeats = 1,
     this.availableSeats = 1,
     this.vehicleType = 'bike',
     this.helmetProvided = true,
     this.contribution = 0.0,
+    this.passengerGenderPreference = 'any',
     this.matchAcceptanceProbability,
     this.notes = '',
     this.status = 'SCHEDULED',
@@ -122,6 +126,7 @@ class RideModel {
       destAddress: _parseString(json, 'destAddress'),
       destLat: _parseDouble(json, 'destLat') ?? 0.0,
       destLng: _parseDouble(json, 'destLng') ?? 0.0,
+      routeCoordinates: _parseRouteCoordinates(json['waypoints']),
       departureTime: depTime,
       totalSeats: total,
       availableSeats: seats,
@@ -130,6 +135,11 @@ class RideModel {
           ? json['helmetProvided']
           : true,
       contribution: fareVal,
+      passengerGenderPreference: _parseString(
+        json,
+        'passengerGenderPreference',
+        defaultValue: 'any',
+      ),
       matchAcceptanceProbability: _parseDouble(
         json,
         'matchAcceptanceProbability',
@@ -176,12 +186,16 @@ class RideModel {
       'destAddress': destAddress,
       'destLat': destLat,
       'destLng': destLng,
+      'waypoints': routeCoordinates
+          .map((point) => {'latitude': point[1], 'longitude': point[0]})
+          .toList(),
       'departureTime': departureTime.toIso8601String(),
       'totalSeats': totalSeats,
       'availableSeats': availableSeats,
       'vehicleType': vehicleType,
       'helmetProvided': helmetProvided,
       'contribution': contribution,
+      'passengerGenderPreference': passengerGenderPreference,
       'matchAcceptanceProbability': matchAcceptanceProbability,
       'notes': notes,
       'status': status,
@@ -206,6 +220,39 @@ class RideModel {
     final val = json[key];
     if (val is num) return val.toDouble();
     if (val is String) return double.tryParse(val);
+    return null;
+  }
+
+  static List<List<double>> _parseRouteCoordinates(dynamic value) {
+    if (value is! List) return const [];
+    final coordinates = <List<double>>[];
+    for (final point in value) {
+      final longitude = point is Map<String, dynamic>
+          ? _coordinateValue(point['longitude'])
+          : point is List && point.isNotEmpty
+          ? _coordinateValue(point[0])
+          : null;
+      final latitude = point is Map<String, dynamic>
+          ? _coordinateValue(point['latitude'])
+          : point is List && point.length > 1
+          ? _coordinateValue(point[1])
+          : null;
+      if (longitude == null ||
+          latitude == null ||
+          longitude < -180 ||
+          longitude > 180 ||
+          latitude < -90 ||
+          latitude > 90) {
+        return const [];
+      }
+      coordinates.add([longitude, latitude]);
+    }
+    return coordinates;
+  }
+
+  static double? _coordinateValue(dynamic value) {
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value);
     return null;
   }
 

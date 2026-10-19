@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import '../../components/components.dart';
 import '../../models/booking_model.dart';
+import '../../models/geocoding_result.dart';
 import '../../models/ride_model.dart';
+import '../../models/route_result.dart';
+import '../map/ride_route_preview_map.dart';
 import '../../services/booking_service.dart';
 import '../../services/ride_service.dart';
+import '../../services/routing_service.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_spacing.dart';
 import '../../theme/app_typography.dart';
@@ -19,7 +23,8 @@ class DriverRequestQueueScreen extends StatefulWidget {
   final String? initialFilterStatus;
 
   @override
-  State<DriverRequestQueueScreen> createState() => _DriverRequestQueueScreenState();
+  State<DriverRequestQueueScreen> createState() =>
+      _DriverRequestQueueScreenState();
 }
 
 class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
@@ -80,6 +85,157 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
     }
   }
 
+  bool _hasValidBookingCoordinate(double latitude, double longitude) =>
+      latitude.isFinite &&
+      longitude.isFinite &&
+      latitude >= -90 &&
+      latitude <= 90 &&
+      longitude >= -180 &&
+      longitude <= 180 &&
+      !(latitude == 0 && longitude == 0);
+
+  Future<List<List<double>>> _resolveBookingMapRoute(RideModel ride) async {
+    if (ride.routeCoordinates.length >= 2) return ride.routeCoordinates;
+    if (!_hasValidBookingCoordinate(ride.originLat, ride.originLng) ||
+        !_hasValidBookingCoordinate(ride.destLat, ride.destLng)) {
+      throw const FormatException(
+        'This ride has no saved route or valid endpoint coordinates.',
+      );
+    }
+    final route = await RoutingService.getDrivingRoute(
+      originLatitude: ride.originLat,
+      originLongitude: ride.originLng,
+      destinationLatitude: ride.destLat,
+      destinationLongitude: ride.destLng,
+    );
+    return route.coordinates;
+  }
+
+  Widget _bookingRouteMap(
+    BookingModel booking,
+    RideModel ride, {
+    required List<List<double>> routeCoordinates,
+    required double height,
+  }) {
+    final firstPoint = routeCoordinates.first;
+    final lastPoint = routeCoordinates.last;
+    return SizedBox(
+      height: height,
+      child: RideRoutePreviewMap(
+        key: ValueKey('booking-route-${booking.id}'),
+        routes: [
+          RouteResult(
+            distanceMeters: 0,
+            durationSeconds: 0,
+            coordinates: routeCoordinates,
+          ),
+        ],
+        selectedRouteIndex: 0,
+        onRouteSelected: (_) {},
+        origin: GeocodingResult(
+          placeId: 'ride-${ride.id}-origin',
+          displayName: ride.originName,
+          latitude: firstPoint[1],
+          longitude: firstPoint[0],
+          type: 'origin',
+        ),
+        destination: GeocodingResult(
+          placeId: 'ride-${ride.id}-destination',
+          displayName: ride.destName,
+          latitude: lastPoint[1],
+          longitude: lastPoint[0],
+          type: 'destination',
+        ),
+        pickupPoint: GeocodingResult(
+          placeId: 'booking-${booking.id}-pickup',
+          displayName: booking.pickupName,
+          latitude: booking.pickupLat,
+          longitude: booking.pickupLng,
+          type: 'pickup',
+        ),
+        dropPoint: GeocodingResult(
+          placeId: 'booking-${booking.id}-drop',
+          displayName: booking.dropName,
+          latitude: booking.dropLat,
+          longitude: booking.dropLng,
+          type: 'drop-off',
+        ),
+        selectable: false,
+      ),
+    );
+  }
+
+  Future<void> _showBookingMap(BookingModel booking, RideModel ride) async {
+    final routeFuture = _resolveBookingMapRoute(ride);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Seeker pickup and drop-off'),
+        content: SizedBox(
+          width: 520,
+          child: FutureBuilder<List<List<double>>>(
+            future: routeFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const SizedBox(
+                  height: 220,
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (snapshot.hasError) {
+                return Text(
+                  'Could not load this ride’s route: ${snapshot.error}',
+                );
+              }
+              final routeCoordinates = snapshot.data;
+              if (routeCoordinates == null || routeCoordinates.length < 2) {
+                return const Text(
+                  'This ride does not have enough route data to show the map.',
+                );
+              }
+              if (!_hasValidBookingCoordinate(
+                    booking.pickupLat,
+                    booking.pickupLng,
+                  ) ||
+                  !_hasValidBookingCoordinate(
+                    booking.dropLat,
+                    booking.dropLng,
+                  )) {
+                return const Text(
+                  'This request does not include valid pickup and drop-off coordinates.',
+                );
+              }
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Pickup: ${booking.pickupName}'),
+                  Text('Drop-off: ${booking.dropName}'),
+                  const Text(
+                    'Blue: route  |  Orange: pickup  |  Purple: drop-off',
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _bookingRouteMap(
+                    booking,
+                    ride,
+                    routeCoordinates: routeCoordinates,
+                    height: 360,
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── Segregated Lists ──────────────────────────────────────────────────────
   List<BookingModel> get _pendingBookings =>
       _allBookings.where((b) => b.status == 'PENDING').toList();
@@ -87,8 +243,9 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
   List<BookingModel> get _acceptedBookings =>
       _allBookings.where((b) => b.status == 'ACCEPTED').toList();
 
-  List<BookingModel> get _historyBookings =>
-      _allBookings.where((b) => b.status != 'PENDING' && b.status != 'ACCEPTED').toList();
+  List<BookingModel> get _historyBookings => _allBookings
+      .where((b) => b.status != 'PENDING' && b.status != 'ACCEPTED')
+      .toList();
 
   // ── Accept Confirmation Flow ──────────────────────────────────────────────
   Future<void> _showAcceptConfirmation(BookingModel booking) async {
@@ -98,18 +255,22 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
     // Find associated ride
     final associatedRide = _myRides.firstWhere(
       (r) => r.id == booking.rideId,
-      orElse: () => booking.ride ?? RideModel(
-        id: booking.rideId,
-        driverId: '',
-        originName: booking.pickupName,
-        destName: booking.dropName,
-        departureTime: DateTime.now(),
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-      ),
+      orElse: () =>
+          booking.ride ??
+          RideModel(
+            id: booking.rideId,
+            driverId: '',
+            originName: booking.pickupName,
+            destName: booking.dropName,
+            departureTime: DateTime.now(),
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+          ),
     );
 
-    final remainingSeats = associatedRide.availableSeats - booking.seatsRequested;
+    final remainingSeats =
+        associatedRide.availableSeats - booking.seatsRequested;
+    final mapRouteFuture = _resolveBookingMapRoute(associatedRide);
 
     await showModalBottomSheet(
       context: context,
@@ -129,172 +290,254 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
               AppSpacing.marginMobile,
               MediaQuery.of(context).viewInsets.bottom + AppSpacing.lg,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Modal Header
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: const BoxDecoration(
-                            color: AppColors.secondaryTint,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.check_circle_outline_rounded,
-                              color: AppColors.secondary, size: 24),
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        Text(
-                          'Accept Passenger Request',
-                          style: AppTypography.headlineSm.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                      ],
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(sheetContext),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.md),
-
-                // Passenger & Seat Summary Card
-                Container(
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceContainerLow,
-                    borderRadius: AppSpacing.radiusMd,
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Modal Header
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Row(
                         children: [
-                          CircleAvatar(
-                            radius: 20,
-                            backgroundColor: AppColors.primaryContainer,
-                            child: Text(
-                              (passenger?.name.isNotEmpty ?? false)
-                                  ? passenger!.name[0].toUpperCase()
-                                  : 'P',
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold, color: AppColors.onPrimary),
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: const BoxDecoration(
+                              color: AppColors.secondaryTint,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.check_circle_outline_rounded,
+                              color: AppColors.secondary,
+                              size: 24,
                             ),
                           ),
                           const SizedBox(width: AppSpacing.sm),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  passenger?.name ?? 'Student Passenger',
-                                  style: AppTypography.labelMd.copyWith(fontWeight: FontWeight.bold),
-                                ),
-                                if (passenger?.rollNumber.isNotEmpty ?? false)
-                                  Text(
-                                    '${passenger?.college ?? ''} • ${passenger?.rollNumber}',
-                                    style: AppTypography.caption
-                                        .copyWith(color: AppColors.onSurfaceVariant),
-                                  ),
-                              ],
+                          Text(
+                            'Accept Passenger Request',
+                            style: AppTypography.headlineSm.copyWith(
+                              fontWeight: FontWeight.bold,
                             ),
-                          ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(
-                                '+₹${booking.fareAmount.toStringAsFixed(0)}',
-                                style: AppTypography.headlineSm.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.secondary,
-                                ),
-                              ),
-                              Text(
-                                '${booking.seatsRequested} seat(s)',
-                                style: AppTypography.caption
-                                    .copyWith(color: AppColors.onSurfaceVariant),
-                              ),
-                            ],
                           ),
                         ],
                       ),
-                      const Divider(height: AppSpacing.md),
-
-                      // Capacity Impact
-                      Row(
-                        children: [
-                          Icon(
-                            remainingSeats >= 0 ? Icons.airline_seat_recline_normal_rounded : Icons.warning_rounded,
-                            size: 16,
-                            color: remainingSeats >= 0 ? AppColors.secondary : AppColors.error,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            remainingSeats >= 0
-                                ? '$remainingSeats open seat(s) remaining after accepting'
-                                : 'Warning: Exceeds current available seats ($remainingSeats)',
-                            style: AppTypography.caption.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: remainingSeats >= 0 ? AppColors.secondary : AppColors.error,
-                            ),
-                          ),
-                        ],
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(sheetContext),
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(height: AppSpacing.md),
+                  const SizedBox(height: AppSpacing.md),
 
-                // Pickup instructions note
-                AppTextField(
-                  controller: noteController,
-                  label: 'Pickup Note to Passenger (Optional)',
-                  hintText: 'e.g. Wait near library stairs; I am riding a black scooter.',
-                  maxLines: 2,
-                ),
-                const SizedBox(height: AppSpacing.lg),
-
-                // Confirmation Button
-                AppPrimaryButton(
-                  text: 'Confirm & Accept Request',
-                  icon: Icons.check_rounded,
-                  isLoading: isProcessing,
-                  onPressed: () async {
-                    setModalState(() => isProcessing = true);
-                    final navigator = Navigator.of(sheetContext);
-                    final messenger = ScaffoldMessenger.of(context);
-
-                    try {
-                      await BookingService.respondToBookingRequest(
-                        booking.id,
-                        'ACCEPTED',
-                        driverResponseNote: noteController.text.trim(),
-                      );
-                      if (!mounted) return;
-                      navigator.pop();
-                      messenger.showSnackBar(
-                        SnackBar(
-                          content: Text('Accepted ${passenger?.name ?? 'Passenger'}! Seat confirmed.'),
-                          backgroundColor: AppColors.secondary,
+                  // Passenger & Seat Summary Card
+                  Container(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceContainerLow,
+                      borderRadius: AppSpacing.radiusMd,
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 20,
+                              backgroundColor: AppColors.primaryContainer,
+                              child: Text(
+                                (passenger?.name.isNotEmpty ?? false)
+                                    ? passenger!.name[0].toUpperCase()
+                                    : 'P',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.onPrimary,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.sm),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    passenger?.name ?? 'Student Seeker',
+                                    style: AppTypography.labelMd.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  if (passenger?.rollNumber.isNotEmpty ?? false)
+                                    Text(
+                                      '${passenger?.college ?? ''} • ${passenger?.rollNumber}',
+                                      style: AppTypography.caption.copyWith(
+                                        color: AppColors.onSurfaceVariant,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  '+₹${booking.fareAmount.toStringAsFixed(0)}',
+                                  style: AppTypography.headlineSm.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.secondary,
+                                  ),
+                                ),
+                                Text(
+                                  '${booking.seatsRequested} seat(s)',
+                                  style: AppTypography.caption.copyWith(
+                                    color: AppColors.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
+                        const Divider(height: AppSpacing.md),
+
+                        // Capacity Impact
+                        Row(
+                          children: [
+                            Icon(
+                              remainingSeats >= 0
+                                  ? Icons.airline_seat_recline_normal_rounded
+                                  : Icons.warning_rounded,
+                              size: 16,
+                              color: remainingSeats >= 0
+                                  ? AppColors.secondary
+                                  : AppColors.error,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              remainingSeats >= 0
+                                  ? '$remainingSeats open seat(s) remaining after accepting'
+                                  : 'Warning: Exceeds current available seats ($remainingSeats)',
+                              style: AppTypography.caption.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: remainingSeats >= 0
+                                    ? AppColors.secondary
+                                    : AppColors.error,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+
+                  Text(
+                    'Pickup and drop-off',
+                    style: AppTypography.labelMd.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text('Pickup: ${booking.pickupName}'),
+                  Text('Drop-off: ${booking.dropName}'),
+                  const Text(
+                    'Blue: route  |  Orange: pickup  |  Purple: drop-off',
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  FutureBuilder<List<List<double>>>(
+                    future: mapRouteFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState != ConnectionState.done) {
+                        return const SizedBox(
+                          height: 180,
+                          child: Center(child: CircularProgressIndicator()),
+                        );
+                      }
+                      if (snapshot.hasError) {
+                        return Text(
+                          'Could not load route preview: ${snapshot.error}',
+                        );
+                      }
+                      final routeCoordinates = snapshot.data;
+                      if (routeCoordinates == null ||
+                          routeCoordinates.length < 2) {
+                        return const Text(
+                          'This ride does not have enough route data to show the map.',
+                        );
+                      }
+                      if (!_hasValidBookingCoordinate(
+                            booking.pickupLat,
+                            booking.pickupLng,
+                          ) ||
+                          !_hasValidBookingCoordinate(
+                            booking.dropLat,
+                            booking.dropLng,
+                          )) {
+                        return const Text(
+                          'This request does not include valid pickup and drop-off coordinates.',
+                        );
+                      }
+                      return _bookingRouteMap(
+                        booking,
+                        associatedRide,
+                        routeCoordinates: routeCoordinates,
+                        height: 210,
                       );
-                      _loadQueueData();
-                    } catch (e) {
-                      setModalState(() => isProcessing = false);
-                      if (!mounted) return;
-                      messenger.showSnackBar(
-                        SnackBar(content: Text('Failed to accept: $e'), backgroundColor: AppColors.error),
-                      );
-                    }
-                  },
-                ),
-              ],
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+
+                  // Pickup instructions note
+                  const SizedBox(height: AppSpacing.sm),
+                  AppTextField(
+                    controller: noteController,
+                    label: 'Pickup Note to Passenger (Optional)',
+                    hintText:
+                        'e.g. Wait near library stairs; I am riding a black scooter.',
+                    maxLines: 2,
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+
+                  // Confirmation Button
+                  AppPrimaryButton(
+                    text: 'Confirm & Accept Request',
+                    icon: Icons.check_rounded,
+                    isLoading: isProcessing,
+                    onPressed: () async {
+                      setModalState(() => isProcessing = true);
+                      final navigator = Navigator.of(sheetContext);
+                      final messenger = ScaffoldMessenger.of(context);
+
+                      try {
+                        await BookingService.respondToBookingRequest(
+                          booking.id,
+                          'ACCEPTED',
+                          driverResponseNote: noteController.text.trim(),
+                        );
+                        if (!mounted) return;
+                        navigator.pop();
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Accepted ${passenger?.name ?? 'Seeker'}! Seat confirmed.',
+                            ),
+                            backgroundColor: AppColors.secondary,
+                          ),
+                        );
+                        _loadQueueData();
+                      } catch (e) {
+                        setModalState(() => isProcessing = false);
+                        if (!mounted) return;
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text('Failed to accept: $e'),
+                            backgroundColor: AppColors.error,
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
             ),
           );
         },
@@ -325,8 +568,6 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
       ),
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setModalState) {
-          final passenger = booking.passenger;
-
           return Padding(
             padding: EdgeInsets.fromLTRB(
               AppSpacing.marginMobile,
@@ -350,12 +591,18 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                             color: AppColors.errorTint,
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.cancel_outlined, color: AppColors.error, size: 24),
+                          child: const Icon(
+                            Icons.cancel_outlined,
+                            color: AppColors.error,
+                            size: 24,
+                          ),
                         ),
                         const SizedBox(width: AppSpacing.sm),
                         Text(
                           'Decline Request',
-                          style: AppTypography.headlineSm.copyWith(fontWeight: FontWeight.bold),
+                          style: AppTypography.headlineSm.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ],
                     ),
@@ -367,8 +614,10 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  'Let ${passenger?.name ?? 'the passenger'} know why you cannot accept their request.',
-                  style: AppTypography.bodyMd.copyWith(color: AppColors.onSurfaceVariant),
+                  'Let the seeker know why you cannot accept their request.',
+                  style: AppTypography.bodyMd.copyWith(
+                    color: AppColors.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.md),
 
@@ -392,8 +641,12 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                       selected: isSelected,
                       selectedColor: AppColors.errorContainer,
                       labelStyle: TextStyle(
-                        color: isSelected ? AppColors.error : AppColors.onSurface,
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        color: isSelected
+                            ? AppColors.error
+                            : AppColors.onSurface,
+                        fontWeight: isSelected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
                         fontSize: 12,
                       ),
                       onSelected: (selected) {
@@ -423,7 +676,9 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                     Expanded(
                       child: OutlinedButton(
                         style: OutlinedButton.styleFrom(
-                          shape: RoundedRectangleBorder(borderRadius: AppSpacing.radiusMd),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: AppSpacing.radiusMd,
+                          ),
                           padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
                         onPressed: () => Navigator.pop(sheetContext),
@@ -436,7 +691,9 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.error,
                           foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: AppSpacing.radiusMd),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: AppSpacing.radiusMd,
+                          ),
                           padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
                         onPressed: isProcessing
@@ -446,7 +703,8 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                                 final navigator = Navigator.of(sheetContext);
                                 final messenger = ScaffoldMessenger.of(context);
 
-                                final note = noteController.text.trim().isNotEmpty
+                                final note =
+                                    noteController.text.trim().isNotEmpty
                                     ? '$selectedReason - ${noteController.text.trim()}'
                                     : selectedReason;
 
@@ -461,7 +719,8 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                                   messenger.showSnackBar(
                                     const SnackBar(
                                       content: Text('Request declined.'),
-                                      backgroundColor: AppColors.onSurfaceVariant,
+                                      backgroundColor:
+                                          AppColors.onSurfaceVariant,
                                     ),
                                   );
                                   _loadQueueData();
@@ -469,7 +728,10 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                                   setModalState(() => isProcessing = false);
                                   if (!mounted) return;
                                   messenger.showSnackBar(
-                                    SnackBar(content: Text('Failed to decline: $e'), backgroundColor: AppColors.error),
+                                    SnackBar(
+                                      content: Text('Failed to decline: $e'),
+                                      backgroundColor: AppColors.error,
+                                    ),
                                   );
                                 }
                               },
@@ -479,7 +741,9 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                                 height: 20,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.white,
+                                  ),
                                 ),
                               )
                             : const Text('Confirm Decline'),
@@ -514,7 +778,11 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                   color: AppColors.primaryContainer,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.pin_rounded, color: AppColors.onPrimary, size: 20),
+                child: const Icon(
+                  Icons.pin_rounded,
+                  color: AppColors.onPrimary,
+                  size: 20,
+                ),
               ),
               const SizedBox(width: AppSpacing.sm),
               const Expanded(
@@ -531,7 +799,9 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
             children: [
               Text(
                 'Ask ${booking.passenger?.name ?? 'the passenger'} for their 4-digit verification code before boarding.',
-                style: AppTypography.bodySm.copyWith(color: AppColors.onSurfaceVariant),
+                style: AppTypography.bodySm.copyWith(
+                  color: AppColors.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: AppSpacing.md),
               TextField(
@@ -553,7 +823,10 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                   fillColor: AppColors.surfaceContainerLow,
                   border: OutlineInputBorder(
                     borderRadius: AppSpacing.radiusMd,
-                    borderSide: const BorderSide(color: AppColors.primary, width: 2),
+                    borderSide: const BorderSide(
+                      color: AppColors.primary,
+                      width: 2,
+                    ),
                   ),
                 ),
                 onChanged: (_) {
@@ -571,14 +844,18 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: AppSpacing.radiusMd),
+                shape: RoundedRectangleBorder(
+                  borderRadius: AppSpacing.radiusMd,
+                ),
               ),
               onPressed: isVerifying
                   ? null
                   : () async {
                       final inputOtp = otpController.text.trim();
                       if (inputOtp.length < 4) {
-                        setModalState(() => otpError = 'Please enter full 4-digit OTP');
+                        setModalState(
+                          () => otpError = 'Please enter full 4-digit OTP',
+                        );
                         return;
                       }
 
@@ -587,12 +864,17 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                       final messenger = ScaffoldMessenger.of(context);
 
                       try {
-                        await BookingService.verifyBookingOtp(booking.id, inputOtp);
+                        await BookingService.verifyBookingOtp(
+                          booking.id,
+                          inputOtp,
+                        );
                         if (!mounted) return;
                         navigator.pop();
                         messenger.showSnackBar(
                           const SnackBar(
-                            content: Text('✅ Passenger verified! Boarding confirmed.'),
+                            content: Text(
+                              '✅ Passenger verified! Boarding confirmed.',
+                            ),
                             backgroundColor: AppColors.secondary,
                           ),
                         );
@@ -652,7 +934,10 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
 
               // Tabs
               Container(
-                margin: const EdgeInsets.symmetric(horizontal: AppSpacing.marginMobile, vertical: 8),
+                margin: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.marginMobile,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: AppColors.surfaceContainerLow,
                   borderRadius: AppSpacing.radiusFull,
@@ -667,7 +952,9 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                   ),
                   labelColor: Colors.white,
                   unselectedLabelColor: AppColors.onSurfaceVariant,
-                  labelStyle: AppTypography.labelMd.copyWith(fontWeight: FontWeight.w700),
+                  labelStyle: AppTypography.labelMd.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                   unselectedLabelStyle: AppTypography.labelMd,
                   tabs: [
                     Tab(
@@ -710,22 +997,25 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _errorMessage != null
-              ? _buildErrorView()
-              : TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildRequestsList(_pendingBookings, isPendingTab: true),
-                    _buildRequestsList(_acceptedBookings, isAcceptedTab: true),
-                    _buildRequestsList(_historyBookings, isHistoryTab: true),
-                  ],
-                ),
+          ? _buildErrorView()
+          : TabBarView(
+              controller: _tabController,
+              children: [
+                _buildRequestsList(_pendingBookings, isPendingTab: true),
+                _buildRequestsList(_acceptedBookings, isAcceptedTab: true),
+                _buildRequestsList(_historyBookings, isHistoryTab: true),
+              ],
+            ),
     );
   }
 
   Widget _buildRideFilterSelector() {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.marginMobile, vertical: 4),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.marginMobile,
+        vertical: 4,
+      ),
       child: Row(
         children: [
           ChoiceChip(
@@ -784,22 +1074,22 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                     color: isPendingTab
                         ? AppColors.warningTint
                         : isAcceptedTab
-                            ? AppColors.secondaryTint
-                            : AppColors.surfaceContainerLow,
+                        ? AppColors.secondaryTint
+                        : AppColors.surfaceContainerLow,
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
                     isPendingTab
                         ? Icons.hourglass_empty_rounded
                         : isAcceptedTab
-                            ? Icons.group_outlined
-                            : Icons.task_alt_rounded,
+                        ? Icons.group_outlined
+                        : Icons.task_alt_rounded,
                     size: 40,
                     color: isPendingTab
                         ? AppColors.tertiary
                         : isAcceptedTab
-                            ? AppColors.secondary
-                            : AppColors.onSurfaceVariant,
+                        ? AppColors.secondary
+                        : AppColors.onSurfaceVariant,
                   ),
                 ),
                 const SizedBox(height: AppSpacing.lg),
@@ -807,18 +1097,22 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                   isPendingTab
                       ? 'No Pending Requests'
                       : isAcceptedTab
-                          ? 'No Confirmed Passengers'
-                          : 'No Past Requests',
-                  style: AppTypography.headlineSm.copyWith(fontWeight: FontWeight.bold),
+                      ? 'No Confirmed Passengers'
+                      : 'No Past Requests',
+                  style: AppTypography.headlineSm.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 Text(
                   isPendingTab
                       ? 'All incoming passenger requests have been addressed!'
                       : isAcceptedTab
-                          ? 'Accept passenger requests from the pending tab to confirm them here.'
-                          : 'Resolved requests and completed rides will appear here.',
-                  style: AppTypography.bodyMd.copyWith(color: AppColors.onSurfaceVariant),
+                      ? 'Accept passenger requests from the pending tab to confirm them here.'
+                      : 'Resolved requests and completed rides will appear here.',
+                  style: AppTypography.bodyMd.copyWith(
+                    color: AppColors.onSurfaceVariant,
+                  ),
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -866,8 +1160,14 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                 radius: 22,
                 backgroundColor: AppColors.primaryContainer,
                 child: Text(
-                  (passenger?.name.isNotEmpty ?? false) ? passenger!.name[0].toUpperCase() : 'P',
-                  style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.onPrimary, fontSize: 16),
+                  (passenger?.name.isNotEmpty ?? false)
+                      ? passenger!.name[0].toUpperCase()
+                      : 'P',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.onPrimary,
+                    fontSize: 16,
+                  ),
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
@@ -879,14 +1179,20 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                       children: [
                         Flexible(
                           child: Text(
-                            passenger?.name ?? 'Passenger',
-                            style: AppTypography.labelMd.copyWith(fontWeight: FontWeight.bold),
+                            passenger?.name ?? 'Seeker',
+                            style: AppTypography.labelMd.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         if (passenger?.isVerified ?? false) ...[
                           const SizedBox(width: 4),
-                          const Icon(Icons.verified_rounded, size: 16, color: AppColors.primary),
+                          const Icon(
+                            Icons.verified_rounded,
+                            size: 16,
+                            color: AppColors.primary,
+                          ),
                         ],
                       ],
                     ),
@@ -895,17 +1201,25 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                         if (passenger?.rollNumber.isNotEmpty ?? false) ...[
                           Text(
                             passenger!.rollNumber,
-                            style: AppTypography.caption.copyWith(color: AppColors.onSurfaceVariant),
+                            style: AppTypography.caption.copyWith(
+                              color: AppColors.onSurfaceVariant,
+                            ),
                           ),
                           const SizedBox(width: 6),
                         ],
                         if (passenger?.ratingAvg != null)
                           Row(
                             children: [
-                              const Icon(Icons.star_rounded, size: 14, color: Colors.amber),
+                              const Icon(
+                                Icons.star_rounded,
+                                size: 14,
+                                color: Colors.amber,
+                              ),
                               Text(
                                 passenger!.ratingAvg.toStringAsFixed(1),
-                                style: AppTypography.caption.copyWith(fontWeight: FontWeight.bold),
+                                style: AppTypography.caption.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ],
                           ),
@@ -930,18 +1244,27 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.two_wheeler_rounded, size: 14, color: AppColors.primary),
+                  const Icon(
+                    Icons.two_wheeler_rounded,
+                    size: 14,
+                    color: AppColors.primary,
+                  ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       'Ride: ${ride.originName} → ${ride.destName}',
-                      style: AppTypography.caption.copyWith(fontWeight: FontWeight.w600),
+                      style: AppTypography.caption.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   Text(
                     _formatTime(ride.departureTime),
-                    style: AppTypography.caption.copyWith(color: AppColors.primary, fontWeight: FontWeight.bold),
+                    style: AppTypography.caption.copyWith(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ],
               ),
@@ -954,9 +1277,17 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
             children: [
               Column(
                 children: [
-                  const Icon(Icons.radio_button_checked, size: 16, color: AppColors.primary),
+                  const Icon(
+                    Icons.radio_button_checked,
+                    size: 16,
+                    color: AppColors.primary,
+                  ),
                   Container(width: 2, height: 22, color: AppColors.border),
-                  const Icon(Icons.location_on, size: 16, color: AppColors.secondary),
+                  const Icon(
+                    Icons.location_on,
+                    size: 16,
+                    color: AppColors.secondary,
+                  ),
                 ],
               ),
               const SizedBox(width: AppSpacing.sm),
@@ -966,14 +1297,18 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                   children: [
                     Text(
                       'Pickup: ${booking.pickupName}',
-                      style: AppTypography.bodySm.copyWith(fontWeight: FontWeight.w600),
+                      style: AppTypography.bodySm.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 10),
                     Text(
                       'Drop: ${booking.dropName}',
-                      style: AppTypography.bodySm.copyWith(fontWeight: FontWeight.w600),
+                      style: AppTypography.bodySm.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -992,12 +1327,24 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                   ),
                   Text(
                     '${booking.seatsRequested} seat${booking.seatsRequested > 1 ? 's' : ''}',
-                    style: AppTypography.caption.copyWith(color: AppColors.onSurfaceVariant),
+                    style: AppTypography.caption.copyWith(
+                      color: AppColors.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
             ],
           ),
+          if (ride != null) ...[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => _showBookingMap(booking, ride),
+                icon: const Icon(Icons.map_outlined, size: 18),
+                label: const Text('View pickup and drop-off on map'),
+              ),
+            ),
+          ],
 
           // Passenger Note
           if (booking.passengerNote.isNotEmpty) ...[
@@ -1012,12 +1359,18 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.chat_bubble_outline_rounded, size: 14, color: AppColors.onSurfaceVariant),
+                  const Icon(
+                    Icons.chat_bubble_outline_rounded,
+                    size: 14,
+                    color: AppColors.onSurfaceVariant,
+                  ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       '"${booking.passengerNote}"',
-                      style: AppTypography.caption.copyWith(fontStyle: FontStyle.italic),
+                      style: AppTypography.caption.copyWith(
+                        fontStyle: FontStyle.italic,
+                      ),
                     ),
                   ),
                 ],
@@ -1037,12 +1390,18 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.info_outline_rounded, size: 14, color: AppColors.primary),
+                  const Icon(
+                    Icons.info_outline_rounded,
+                    size: 14,
+                    color: AppColors.primary,
+                  ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       'Your note: "${booking.driverResponseNote}"',
-                      style: AppTypography.caption.copyWith(color: AppColors.onSurfaceVariant),
+                      style: AppTypography.caption.copyWith(
+                        color: AppColors.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ],
@@ -1061,7 +1420,9 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.error,
                       side: const BorderSide(color: AppColors.error),
-                      shape: RoundedRectangleBorder(borderRadius: AppSpacing.radiusMd),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: AppSpacing.radiusMd,
+                      ),
                       padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
                     onPressed: () => _showRejectConfirmation(booking),
@@ -1075,7 +1436,9 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.secondary,
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: AppSpacing.radiusMd),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: AppSpacing.radiusMd,
+                      ),
                       padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
                     onPressed: () => _showAcceptConfirmation(booking),
@@ -1094,7 +1457,9 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: AppSpacing.radiusMd),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: AppSpacing.radiusMd,
+                      ),
                       padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
                     onPressed: () => _showOtpVerificationModal(booking),
@@ -1110,12 +1475,18 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                       border: Border.all(color: AppColors.border),
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.phone_rounded, color: AppColors.primary, size: 20),
+                      icon: const Icon(
+                        Icons.phone_rounded,
+                        color: AppColors.primary,
+                        size: 20,
+                      ),
                       tooltip: 'Call Passenger',
                       onPressed: () {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: Text('Contact ${passenger?.name}: ${passenger?.phone}'),
+                            content: Text(
+                              'Contact ${passenger?.name}: ${passenger?.phone}',
+                            ),
                             backgroundColor: AppColors.primary,
                           ),
                         );
@@ -1134,25 +1505,25 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
   Widget _buildStatusBadge(String status) {
     return switch (status.toUpperCase()) {
       'PENDING' => const AppStatusBadge(
-          status: RideStatusType.pending,
-          customLabel: 'Pending Review',
-        ),
+        status: RideStatusType.pending,
+        customLabel: 'Pending Review',
+      ),
       'ACCEPTED' => const AppStatusBadge(
-          status: RideStatusType.confirmed,
-          customLabel: 'Confirmed',
-        ),
+        status: RideStatusType.confirmed,
+        customLabel: 'Confirmed',
+      ),
       'REJECTED' => const AppStatusBadge(
-          status: RideStatusType.cancelled,
-          customLabel: 'Declined',
-        ),
+        status: RideStatusType.cancelled,
+        customLabel: 'Declined',
+      ),
       'COMPLETED' => const AppStatusBadge(
-          status: RideStatusType.completed,
-          customLabel: 'Completed',
-        ),
+        status: RideStatusType.completed,
+        customLabel: 'Completed',
+      ),
       'CANCELLED' => const AppStatusBadge(
-          status: RideStatusType.cancelled,
-          customLabel: 'Cancelled',
-        ),
+        status: RideStatusType.cancelled,
+        customLabel: 'Cancelled',
+      ),
       _ => AppStatusBadge(status: RideStatusType.pending, customLabel: status),
     };
   }
@@ -1164,14 +1535,26 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline_rounded, color: AppColors.error, size: 48),
+            const Icon(
+              Icons.error_outline_rounded,
+              color: AppColors.error,
+              size: 48,
+            ),
             const SizedBox(height: AppSpacing.md),
-            Text('Failed to load queue',
-                style: AppTypography.headlineSm.copyWith(fontWeight: FontWeight.bold)),
+            Text(
+              'Failed to load queue',
+              style: AppTypography.headlineSm.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: AppSpacing.xs),
-            Text(_errorMessage!,
-                style: AppTypography.bodySm.copyWith(color: AppColors.onSurfaceVariant),
-                textAlign: TextAlign.center),
+            Text(
+              _errorMessage!,
+              style: AppTypography.bodySm.copyWith(
+                color: AppColors.onSurfaceVariant,
+              ),
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: AppSpacing.lg),
             ElevatedButton.icon(
               icon: const Icon(Icons.refresh_rounded),

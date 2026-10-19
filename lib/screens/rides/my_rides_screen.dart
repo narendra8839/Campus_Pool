@@ -487,7 +487,7 @@ class _MyRidesScreenState extends State<MyRidesScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      passenger?.name ?? 'Passenger',
+                      passenger?.name ?? 'Seeker',
                       style: AppTypography.labelMd.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
@@ -1275,11 +1275,18 @@ class _MyRidesScreenState extends State<MyRidesScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      driver?.name ?? 'Driver',
+                      driver?.name ?? 'Biker',
                       style: AppTypography.labelMd.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                    if (driver?.phone.isNotEmpty == true)
+                      Text(
+                        driver!.phone,
+                        style: AppTypography.caption.copyWith(
+                          color: AppColors.onSurfaceVariant,
+                        ),
+                      ),
                     Row(
                       children: [
                         if (driver?.vehicleModel != null &&

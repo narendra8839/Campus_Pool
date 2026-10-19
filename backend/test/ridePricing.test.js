@@ -36,6 +36,58 @@ test('prices valid coordinates from OSRM road distance and stores its geometry',
   ]);
 });
 
+test('prices and stores the selected alternative while routing through a via point', async () => {
+  let requestedViaPoints;
+  const result = await priceRide(
+    {
+      origin: { latitude: 18, longitude: 73 },
+      destination: { latitude: 18.1, longitude: 73.1 },
+      viaPoints: [{ latitude: 18.05, longitude: 73.04 }],
+      selectedRouteIndex: 1,
+    },
+    async (_origin, _destination, viaPoints) => {
+      requestedViaPoints = viaPoints;
+      return [
+        {
+          distanceMeters: 10000,
+          coordinates: [[73, 18], [73.1, 18.1]],
+        },
+        {
+          distanceMeters: 14000,
+          coordinates: [[73, 18], [73.04, 18.05], [73.1, 18.1]],
+        },
+      ];
+    },
+  );
+
+  assert.deepEqual(requestedViaPoints, [
+    { latitude: 18.05, longitude: 73.04 },
+  ]);
+  assert.equal(result.contribution, 70);
+  assert.deepEqual(result.waypoints, [
+    { latitude: 18, longitude: 73 },
+    { latitude: 18.05, longitude: 73.04 },
+    { latitude: 18.1, longitude: 73.1 },
+  ]);
+});
+
+test('rejects a selected route that is no longer available', async () => {
+  await assert.rejects(
+    priceRide(
+      {
+        origin: { latitude: 18, longitude: 73 },
+        destination: { latitude: 18.1, longitude: 73.1 },
+        selectedRouteIndex: 1,
+      },
+      async () => [{
+        distanceMeters: 10000,
+        coordinates: [[73, 18], [73.1, 18.1]],
+      }],
+    ),
+    (error) => error instanceof RoutingError && error.statusCode === 409,
+  );
+});
+
 test('preserves legacy fare calculation when route coordinates are unavailable', async () => {
   const result = await priceRide({
     origin: { latitude: 0, longitude: 0 },

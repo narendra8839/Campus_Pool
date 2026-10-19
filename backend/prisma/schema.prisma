@@ -133,13 +133,14 @@ model Ride {
   departureTime DateTime
 
   // Capacity & Ride Details
-  totalSeats     Int     @default(1)
-  availableSeats Int     @default(1)
-  vehicleType    String  @default("bike")
-  helmetProvided Boolean @default(true)
-  contribution   Float   @default(0.0)
-  notes          String? @default("")
-  status         String  @default("SCHEDULED") // SCHEDULED, ONGOING, COMPLETED, CANCELLED
+  totalSeats                Int     @default(1)
+  availableSeats            Int     @default(1)
+  vehicleType               String  @default("bike")
+  helmetProvided            Boolean @default(true)
+  contribution              Float   @default(0.0)
+  passengerGenderPreference String  @default("any")
+  notes                     String? @default("")
+  status                    String  @default("SCHEDULED") // SCHEDULED, ONGOING, COMPLETED, CANCELLED
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

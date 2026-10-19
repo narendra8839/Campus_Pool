@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
-import '../../models/corridor_model.dart';
+import 'package:geolocator/geolocator.dart';
+
 import '../../models/geocoding_result.dart';
 import '../../models/route_result.dart';
+import '../../services/geocoding_service.dart';
 import '../../services/route_preview_store.dart';
-import '../../services/route_service.dart';
 import '../../services/routing_service.dart';
 import '../../services/ride_service.dart';
 import '../../utils/ride_fare.dart';
+import 'map/ride_location_picker_screen.dart';
+import 'map/ride_route_preview_map.dart';
 import 'navigation/main_navigation_shell.dart';
 
 class OfferRideScreen extends StatefulWidget {
@@ -25,23 +28,35 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
   final _capacityController = TextEditingController(text: '1');
   DateTime? _selectedDateTime;
   String _selectedVehicleType = 'bike';
+  String _passengerGenderPreference = 'any';
   final _notesController = TextEditingController();
   bool _isSubmitting = false;
-  List<CorridorModel> _corridors = const [];
-  CorridorModel? _selectedCorridor;
-  HubModel? _selectedOriginHub;
-  HubModel? _selectedDestinationHub;
-  bool _loadingRoutes = true;
-  bool _returningFromVit = false;
+  GeocodingResult? _originPlace;
+  GeocodingResult? _destinationPlace;
+  bool _locatingCurrentPosition = true;
+  String? _currentLocationError;
   bool _routeLoading = false;
   String? _routeError;
-  RouteResult? _routePreview;
+  List<RouteResult>? _routePreview;
+  int _selectedRouteIndex = 0;
+  GeocodingResult? _viaPlace;
   int _routeRequestId = 0;
+  int _currentLocationRequestId = 0;
+
+  RouteResult? get _selectedRoute {
+    final routes = _routePreview;
+    if (routes == null ||
+        _selectedRouteIndex < 0 ||
+        _selectedRouteIndex >= routes.length) {
+      return null;
+    }
+    return routes[_selectedRouteIndex];
+  }
 
   @override
   void initState() {
     super.initState();
-    _loadCorridors();
+    _useCurrentLocation();
   }
 
   @override
@@ -51,64 +66,80 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
     _capacityController.dispose();
     _notesController.dispose();
     ++_routeRequestId;
+    ++_currentLocationRequestId;
     super.dispose();
   }
 
-  Future<void> _loadCorridors() async {
+  Future<void> _useCurrentLocation() async {
+    final requestId = ++_currentLocationRequestId;
+    setState(() {
+      _locatingCurrentPosition = true;
+      _currentLocationError = null;
+    });
+
     try {
-      final corridors = await RouteService.listCorridors();
-      if (!mounted) return;
-      setState(() {
-        _corridors = corridors;
-        _selectedCorridor = corridors.isEmpty ? null : corridors.first;
-        _selectMorningDefaults();
-        _loadingRoutes = false;
-      });
-      _updateRoutePreview();
-    } catch (_) {
-      if (mounted) {
-        setState(() => _loadingRoutes = false);
-        _updateRoutePreview();
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        throw Exception(
+          'Location services are turned off. Enable them or choose the start location on the map.',
+        );
       }
-    }
-  }
 
-  void _selectMorningDefaults() {
-    final corridor = _selectedCorridor;
-    if (corridor == null || corridor.hubs.length < 2) return;
-    _selectedOriginHub = corridor.hubs.first;
-    _selectedDestinationHub = corridor.vitHub ?? corridor.hubs.last;
-    _originController.text = _selectedOriginHub!.name;
-    _destinationController.text = _selectedDestinationHub!.name;
-  }
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied) {
+        throw Exception(
+          'Location permission was denied. Allow access or choose the start location on the map.',
+        );
+      }
+      if (permission == LocationPermission.deniedForever) {
+        throw Exception(
+          'Location permission is blocked in device settings. Enable it or choose the start location on the map.',
+        );
+      }
 
-  void _selectEveningDefaults() {
-    final corridor = _selectedCorridor;
-    if (corridor == null || corridor.hubs.length < 2) return;
-    _selectedOriginHub = corridor.vitHub ?? corridor.hubs.last;
-    _selectedDestinationHub = corridor.hubs.first;
-    _originController.text = _selectedOriginHub!.name;
-    _destinationController.text = _selectedDestinationHub!.name;
-  }
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
+      );
+      if (!mounted || requestId != _currentLocationRequestId) return;
 
-  void _selectDirection(bool returning) {
-    _returningFromVit = returning;
-    if (returning) {
-      _selectEveningDefaults();
-    } else {
-      _selectMorningDefaults();
+      final place = await GeocodingService.reverse(
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
+      if (!mounted || requestId != _currentLocationRequestId) return;
+
+      final currentPlace = GeocodingResult(
+        placeId: place.placeId,
+        displayName: place.displayName,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        type: place.type,
+      );
+      setState(() {
+        _originPlace = currentPlace;
+        _originController.text = currentPlace.displayName;
+        _locatingCurrentPosition = false;
+      });
+      await _updateRoutePreview();
+    } catch (error) {
+      if (!mounted || requestId != _currentLocationRequestId) return;
+      setState(() {
+        _locatingCurrentPosition = false;
+        _currentLocationError =
+            'Could not use your current location: ${error.toString().replaceFirst('Exception: ', '')}';
+      });
     }
   }
 
   Future<void> _updateRoutePreview() async {
-    final origin = _selectedOriginHub;
-    final destination = _selectedDestinationHub;
-    if (origin == null ||
-        destination == null ||
-        origin.latitude == 0 ||
-        origin.longitude == 0 ||
-        destination.latitude == 0 ||
-        destination.longitude == 0) {
+    final origin = _originPlace;
+    final destination = _destinationPlace;
+    if (origin == null || destination == null) {
       ++_routeRequestId;
       RoutePreviewStore.instance.clear();
       if (mounted) {
@@ -116,6 +147,7 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
           _routePreview = null;
           _routeLoading = false;
           _routeError = null;
+          _selectedRouteIndex = 0;
         });
       }
       return;
@@ -127,36 +159,25 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
       _routeLoading = true;
       _routeError = null;
       _routePreview = null;
+      _selectedRouteIndex = 0;
     });
     try {
-      final route = await RoutingService.getDrivingRoute(
+      final routes = await RoutingService.getDrivingRoutes(
         originLatitude: origin.latitude,
         originLongitude: origin.longitude,
         destinationLatitude: destination.latitude,
         destinationLongitude: destination.longitude,
+        viaLatitude: _viaPlace?.latitude,
+        viaLongitude: _viaPlace?.longitude,
       );
-      if (!mounted || requestId != _routeRequestId) return;
-      final routeOrigin = GeocodingResult(
-        placeId: origin.id,
-        displayName: origin.name,
-        latitude: origin.latitude,
-        longitude: origin.longitude,
-        type: 'hub',
-      );
-      final routeDestination = GeocodingResult(
-        placeId: destination.id,
-        displayName: destination.name,
-        latitude: destination.latitude,
-        longitude: destination.longitude,
-        type: 'hub',
-      );
+      if (!mounted || requestId != _routeRequestId || routes.isEmpty) return;
       RoutePreviewStore.instance.setPreview(
-        route: route,
-        origin: routeOrigin,
-        destination: routeDestination,
+        route: routes.first,
+        origin: origin,
+        destination: destination,
       );
       setState(() {
-        _routePreview = route;
+        _routePreview = routes;
         _routeLoading = false;
       });
     } catch (error) {
@@ -169,68 +190,143 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
     }
   }
 
-  Future<void> _submitOffer() async {
-    if (_formKey.currentState?.validate() ?? false) {
-      setState(() {
-        _isSubmitting = true;
-      });
+  void _selectRoute(int routeIndex) {
+    final routes = _routePreview;
+    if (routes == null || routeIndex < 0 || routeIndex >= routes.length) return;
+    setState(() => _selectedRouteIndex = routeIndex);
+    final origin = _originPlace;
+    final destination = _destinationPlace;
+    if (origin != null && destination != null) {
+      RoutePreviewStore.instance.setPreview(
+        route: routes[routeIndex],
+        origin: origin,
+        destination: destination,
+      );
+    }
+  }
 
-      try {
-        // Prepare data for backend
-        final rideData = {
-          'originName': _originController.text.trim(),
-          'destName': _destinationController.text.trim(),
-          'departureTime': (_selectedDateTime ?? DateTime.now())
-              .toUtc()
-              .toIso8601String(),
-          'totalSeats': int.parse(_capacityController.text.trim()),
-          'vehicleType': _selectedVehicleType,
-          'notes': _notesController.text.trim(),
-          // Optional fields with defaults
-          'originAddress': '',
-          'originLat': 0.0,
-          'originLng': 0.0,
-          'destAddress': '',
-          'destLat': 0.0,
-          'destLng': 0.0,
-          'waypoints': [],
-          'helmetProvided': true,
-          'contribution': 0.0,
-          if (_selectedCorridor != null) 'corridorId': _selectedCorridor!.id,
-          if (_selectedOriginHub != null) 'originHubId': _selectedOriginHub!.id,
-          if (_selectedDestinationHub != null)
-            'destinationHubId': _selectedDestinationHub!.id,
-        };
-
-        // Call the service to create the ride
-        final createdRide = await RideService.offerRide(rideData);
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Ride offered successfully!')),
-          );
-          if (widget.embeddedInShell) {
-            _originController.clear();
-            _destinationController.clear();
-            _notesController.clear();
-            MainNavigationShell.switchTab(context, 1);
-          } else {
-            Navigator.pop(context, createdRide);
-          }
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('Failed to offer ride: $e')));
-        }
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isSubmitting = false;
-          });
-        }
+  Future<void> _chooseLocation({required bool origin}) async {
+    if (origin) {
+      ++_currentLocationRequestId;
+      setState(() => _locatingCurrentPosition = false);
+    }
+    final initialPlace = origin ? _originPlace : _destinationPlace;
+    final place = await Navigator.push<GeocodingResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RideLocationPickerScreen(initialPlace: initialPlace),
+      ),
+    );
+    if (!mounted || place == null) return;
+    setState(() {
+      if (origin) {
+        _originPlace = place;
+        _originController.text = place.displayName;
+        _currentLocationError = null;
+      } else {
+        _destinationPlace = place;
+        _destinationController.text = place.displayName;
       }
+    });
+    await _updateRoutePreview();
+  }
+
+  Future<void> _chooseViaPoint() async {
+    final place = await Navigator.push<GeocodingResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RideLocationPickerScreen(initialPlace: _viaPlace),
+      ),
+    );
+    if (!mounted || place == null) return;
+    setState(() => _viaPlace = place);
+    await _updateRoutePreview();
+  }
+
+  Future<void> _submitOffer() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (_originPlace == null || _destinationPlace == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Choose a start and destination on the map.'),
+        ),
+      );
+      return;
+    }
+    if (_selectedRoute == null || _routeLoading || _routeError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Wait for a valid route preview before offering the ride.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      final origin = _originPlace!;
+      final destination = _destinationPlace!;
+      final rideData = {
+        'originName': origin.displayName,
+        'destName': destination.displayName,
+        'departureTime': (_selectedDateTime ?? DateTime.now())
+            .toUtc()
+            .toIso8601String(),
+        'totalSeats': int.parse(_capacityController.text.trim()),
+        'vehicleType': _selectedVehicleType,
+        'passengerGenderPreference': _passengerGenderPreference,
+        'notes': _notesController.text.trim(),
+        'originAddress': origin.displayName,
+        'originLat': origin.latitude,
+        'originLng': origin.longitude,
+        'destAddress': destination.displayName,
+        'destLat': destination.latitude,
+        'destLng': destination.longitude,
+        'waypoints': [],
+        'viaPoints': [
+          if (_viaPlace != null)
+            {
+              'latitude': _viaPlace!.latitude,
+              'longitude': _viaPlace!.longitude,
+            },
+        ],
+        'selectedRouteIndex': _selectedRouteIndex,
+        'helmetProvided': true,
+        'contribution': 0.0,
+      };
+
+      final createdRide = await RideService.offerRide(rideData);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ride offered successfully!')),
+      );
+      if (widget.embeddedInShell) {
+        _originController.clear();
+        _destinationController.clear();
+        _notesController.clear();
+        setState(() {
+          _originPlace = null;
+          _destinationPlace = null;
+          _routePreview = null;
+          _routeError = null;
+          _selectedRouteIndex = 0;
+          _viaPlace = null;
+        });
+        RoutePreviewStore.instance.clear();
+        MainNavigationShell.switchTab(context, 1);
+      } else {
+        Navigator.pop(context, createdRide);
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to offer ride: $error')));
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
@@ -278,105 +374,53 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (_loadingRoutes)
-                const LinearProgressIndicator()
-              else if (_corridors.isNotEmpty) ...[
-                DropdownButtonFormField<CorridorModel>(
-                  value: _selectedCorridor,
-                  decoration: const InputDecoration(
-                    labelText: 'VIT commute corridor',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.alt_route),
+              if (_locatingCurrentPosition)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      SizedBox(width: 10),
+                      Expanded(child: Text('Getting your current location…')),
+                    ],
                   ),
-                  items: _corridors
-                      .map(
-                        (corridor) => DropdownMenuItem(
-                          value: corridor,
-                          child: Text(corridor.name),
+                ),
+              if (_currentLocationError != null)
+                Card(
+                  color: Theme.of(context).colorScheme.errorContainer,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_currentLocationError!),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton.icon(
+                            onPressed: _useCurrentLocation,
+                            icon: const Icon(Icons.my_location),
+                            label: const Text('Try current location again'),
+                          ),
                         ),
-                      )
-                      .toList(),
-                  onChanged: (corridor) {
-                    if (corridor == null) return;
-                    setState(() {
-                      _selectedCorridor = corridor;
-                      _selectMorningDefaults();
-                    });
-                    _updateRoutePreview();
-                  },
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Select hubs in the same direction. VIT College is always one endpoint.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 8),
-                SegmentedButton<bool>(
-                  segments: const [
-                    ButtonSegment(value: false, label: Text('To VIT')),
-                    ButtonSegment(value: true, label: Text('From VIT')),
-                  ],
-                  selected: {_returningFromVit},
-                  onSelectionChanged: (selection) {
-                    setState(() => _selectDirection(selection.first));
-                    _updateRoutePreview();
-                  },
-                ),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<HubModel>(
-                  value: _selectedOriginHub,
-                  decoration: const InputDecoration(
-                    labelText: 'Pickup / origin hub',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.trip_origin),
+                      ],
+                    ),
                   ),
-                  items: _selectedCorridor!.hubs
-                      .map(
-                        (hub) =>
-                            DropdownMenuItem(value: hub, child: Text(hub.name)),
-                      )
-                      .toList(),
-                  onChanged: (hub) {
-                    if (hub == null) return;
-                    setState(() {
-                      _selectedOriginHub = hub;
-                      _originController.text = hub.name;
-                    });
-                    _updateRoutePreview();
-                  },
                 ),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<HubModel>(
-                  value: _selectedDestinationHub,
-                  decoration: const InputDecoration(
-                    labelText: 'Destination hub',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.location_on),
-                  ),
-                  items: _selectedCorridor!.hubs
-                      .map(
-                        (hub) =>
-                            DropdownMenuItem(value: hub, child: Text(hub.name)),
-                      )
-                      .toList(),
-                  onChanged: (hub) {
-                    if (hub == null) return;
-                    setState(() {
-                      _selectedDestinationHub = hub;
-                      _destinationController.text = hub.name;
-                    });
-                    _updateRoutePreview();
-                  },
-                ),
-                const SizedBox(height: 16),
-              ],
               TextFormField(
                 controller: _originController,
-                readOnly: _corridors.isNotEmpty,
+                readOnly: true,
+                onTap: () => _chooseLocation(origin: true),
                 decoration: const InputDecoration(
-                  labelText: 'Origin',
+                  labelText: 'Start location',
+                  helperText:
+                      'Prefilled from your current location. Tap to adjust.',
                   border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.location_on),
+                  prefixIcon: Icon(Icons.trip_origin),
+                  suffixIcon: Icon(Icons.map_outlined),
                 ),
                 validator: (value) {
                   if (value == null || value.isEmpty) {
@@ -388,11 +432,14 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _destinationController,
-                readOnly: _corridors.isNotEmpty,
+                readOnly: true,
+                onTap: () => _chooseLocation(origin: false),
                 decoration: const InputDecoration(
                   labelText: 'Destination',
+                  helperText: 'Search for a place, then confirm its map pin.',
                   border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.location_on),
+                  prefixIcon: Icon(Icons.flag_outlined),
+                  suffixIcon: Icon(Icons.map_outlined),
                 ),
                 validator: (value) {
                   if (value == null || value.isEmpty) {
@@ -401,6 +448,29 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
                   return null;
                 },
               ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _routeLoading ? null : _chooseViaPoint,
+                icon: const Icon(Icons.add_road),
+                label: Text(
+                  _viaPlace == null
+                      ? 'Add a via point (optional)'
+                      : 'Via: ${_viaPlace!.displayName}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (_viaPlace != null)
+                TextButton.icon(
+                  onPressed: _routeLoading
+                      ? null
+                      : () {
+                          setState(() => _viaPlace = null);
+                          _updateRoutePreview();
+                        },
+                  icon: const Icon(Icons.close),
+                  label: const Text('Remove via point'),
+                ),
               const SizedBox(height: 16),
               if (_routeLoading)
                 const Card(
@@ -429,21 +499,62 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Road distance: ${_routePreview!.formattedDistance}',
+                          'Route ${_selectedRouteIndex + 1} of ${_routePreview!.length}',
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Estimated fare: ${formatRideFare(_routePreview!.distanceMeters)} per seat (₹5/km)',
+                          'Road distance: ${_selectedRoute!.formattedDistance}',
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Estimated driving time: ${_routePreview!.formattedDuration}',
+                          'Estimated fare: ${formatRideFare(_selectedRoute!.distanceMeters)} per seat (₹5/km)',
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'The route is shown on the Home map.',
-                          style: Theme.of(context).textTheme.bodySmall,
+                          'Estimated driving time: ${_selectedRoute!.formattedDuration}',
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _routePreview!.length == 1
+                              ? 'Only one route was returned. Add a via point to request another route.'
+                              : 'Tap a different route line on the map to select it.',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Icon(Icons.circle, size: 10, color: Colors.green),
+                            SizedBox(width: 4),
+                            Text('Start'),
+                            SizedBox(width: 16),
+                            Icon(Icons.circle, size: 10, color: Colors.red),
+                            SizedBox(width: 4),
+                            Text('Destination'),
+                            if (_viaPlace != null) ...[
+                              SizedBox(width: 16),
+                              Icon(
+                                Icons.circle,
+                                size: 10,
+                                color: Colors.deepOrange,
+                              ),
+                              SizedBox(width: 4),
+                              Text('Via point'),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 220,
+                          child: RideRoutePreviewMap(
+                            key: ValueKey(_routeRequestId),
+                            routes: _routePreview!,
+                            selectedRouteIndex: _selectedRouteIndex,
+                            onRouteSelected: _selectRoute,
+                            origin: _originPlace!,
+                            destination: _destinationPlace!,
+                            viaPoint: _viaPlace,
+                          ),
                         ),
                       ],
                     ),
@@ -511,6 +622,27 @@ class _OfferRideScreenState extends State<OfferRideScreen> {
                     setState(() {
                       _selectedVehicleType = value;
                     });
+                  }
+                },
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                value: _passengerGenderPreference,
+                decoration: const InputDecoration(
+                  labelText: 'Passenger gender preference',
+                  helperText: 'Only compatible seekers can request this ride.',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.people_outline),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'any', child: Text('Any gender')),
+                  DropdownMenuItem(value: 'female', child: Text('Women')),
+                  DropdownMenuItem(value: 'male', child: Text('Men')),
+                  DropdownMenuItem(value: 'other', child: Text('Other')),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _passengerGenderPreference = value);
                   }
                 },
               ),

@@ -232,7 +232,7 @@ class _AutoGroupsScreenState extends State<AutoGroupsScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Auto Groups'),
+        title: const Text('Share a Rickshaw'),
         bottom: TabBar(
           controller: _tabController,
           tabs: const [

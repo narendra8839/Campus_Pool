@@ -86,12 +86,15 @@ function toRoute(route) {
   };
 }
 
-async function requestRoute(origin, destination) {
+async function requestRoutes(origin, destination, viaPoints = []) {
   if (pendingOsrmRequests >= MAX_PENDING_REQUESTS) {
     throw new RoutingError('Routing is busy. Try again shortly.', 503);
   }
 
-  const coordinates = `${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}`;
+  const routePoints = [origin, ...viaPoints, destination];
+  const coordinates = routePoints
+    .map(({ longitude, latitude }) => `${longitude},${latitude}`)
+    .join(';');
   let url;
   try {
     url = new URL(`${OSRM_BASE_URL}/route/v1/driving/${coordinates}`);
@@ -101,6 +104,7 @@ async function requestRoute(origin, destination) {
   url.searchParams.set('overview', 'full');
   url.searchParams.set('geometries', 'geojson');
   url.searchParams.set('steps', 'false');
+  url.searchParams.set('alternatives', 'true');
 
   const scheduledRequest = requestQueue.then(async () => {
     const delay = Math.max(0, nextRequestAt - Date.now());
@@ -138,7 +142,7 @@ async function requestRoute(origin, destination) {
     if (result.code !== 'Ok' || !Array.isArray(result.routes) || result.routes.length === 0) {
       throw new RoutingError('Routing service could not calculate a route.', 502);
     }
-    return toRoute(result.routes[0]);
+    return result.routes.map(toRoute);
   } catch (error) {
     if (error instanceof RoutingError) throw error;
     if (error.name === 'TimeoutError' || error.name === 'AbortError') {
@@ -150,10 +154,14 @@ async function requestRoute(origin, destination) {
   }
 }
 
-async function getRoute(origin, destination) {
+async function getRoutes(origin, destination, viaPoints = []) {
   const key = [
     origin.latitude.toFixed(5),
     origin.longitude.toFixed(5),
+    ...viaPoints.flatMap((point) => [
+      point.latitude.toFixed(5),
+      point.longitude.toFixed(5),
+    ]),
     destination.latitude.toFixed(5),
     destination.longitude.toFixed(5),
   ].join(':');
@@ -163,14 +171,19 @@ async function getRoute(origin, destination) {
   const pending = pendingRequests.get(key);
   if (pending) return pending;
 
-  const request = requestRoute(origin, destination)
-    .then((route) => {
-      cacheRoute(key, route);
-      return route;
+  const request = requestRoutes(origin, destination, viaPoints)
+    .then((routes) => {
+      cacheRoute(key, routes);
+      return routes;
     })
     .finally(() => pendingRequests.delete(key));
   pendingRequests.set(key, request);
   return request;
 }
 
-module.exports = { RoutingError, getRoute };
+async function getRoute(origin, destination) {
+  const routes = await getRoutes(origin, destination);
+  return routes[0];
+}
+
+module.exports = { RoutingError, getRoute, getRoutes };

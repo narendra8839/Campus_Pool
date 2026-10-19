@@ -984,7 +984,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           top: MediaQuery.of(context).padding.top + 120,
           child: PointerInterceptor(
             child: SizedBox(
-              width: 160,
+              width: 200,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.end,
@@ -997,7 +997,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                       ),
                     ),
                     icon: const Icon(Icons.groups_rounded, size: 18),
-                    label: const Text('Auto Groups'),
+                    label: const Text('Share a Rickshaw'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.surface,
                       foregroundColor: AppColors.secondary,
@@ -1946,7 +1946,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     return AppRideCard(
       driverName: driver?.name.isNotEmpty == true
           ? driver!.name
-          : 'Campus Driver',
+          : 'Campus Biker',
       origin: ride.originName,
       destination: ride.destName,
       departureTime: status == RideStatusType.active

@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { getRoute } = require('../src/services/osrmService');
+const { getRoute, getRoutes } = require('../src/services/osrmService');
 const { route } = require('../src/controllers/routingController');
 
 test('OSRM route request converts geometry and preserves distance and duration', async () => {
@@ -33,9 +33,60 @@ test('OSRM route request converts geometry and preserves distance and duration',
     assert.match(requestUrl.pathname, /\/route\/v1\/driving\/73\.8,18\.5;73\.81,18\.51$/);
     assert.equal(requestUrl.searchParams.get('overview'), 'full');
     assert.equal(requestUrl.searchParams.get('geometries'), 'geojson');
+    assert.equal(requestUrl.searchParams.get('alternatives'), 'true');
     assert.equal(result.distanceMeters, 2400.5);
     assert.equal(result.durationSeconds, 540);
     assert.deepEqual(result.coordinates, [[73.8, 18.5], [73.81, 18.51]]);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('OSRM returns alternative routes and includes a requested via point', async () => {
+  const originalFetch = global.fetch;
+  let requestUrl;
+  global.fetch = async (url) => {
+    requestUrl = new URL(url);
+    return {
+      ok: true,
+      json: async () => ({
+        code: 'Ok',
+        routes: [
+          {
+            distance: 2400,
+            duration: 540,
+            geometry: {
+              type: 'LineString',
+              coordinates: [[73.8, 18.5], [73.81, 18.51]],
+            },
+          },
+          {
+            distance: 2800,
+            duration: 600,
+            geometry: {
+              type: 'LineString',
+              coordinates: [[73.8, 18.5], [73.805, 18.505], [73.81, 18.51]],
+            },
+          },
+        ],
+      }),
+    };
+  };
+
+  try {
+    const routes = await getRoutes(
+      { latitude: 18.5, longitude: 73.8 },
+      { latitude: 18.51, longitude: 73.81 },
+      [{ latitude: 18.505, longitude: 73.805 }],
+    );
+
+    assert.match(
+      requestUrl.pathname,
+      /\/route\/v1\/driving\/73\.8,18\.5;73\.805,18\.505;73\.81,18\.51$/,
+    );
+    assert.equal(requestUrl.searchParams.get('alternatives'), 'true');
+    assert.equal(routes.length, 2);
+    assert.equal(routes[1].distanceMeters, 2800);
   } finally {
     global.fetch = originalFetch;
   }

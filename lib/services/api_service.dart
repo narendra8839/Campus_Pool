@@ -42,28 +42,35 @@ class ApiService {
 
   static List<String> _getFallbackBaseUrls() {
     if (kIsWeb) {
-      return [_deployedBaseUrl, 'http://localhost:5000/api'];
+      const localUrl = 'http://localhost:5000/api';
+      return kDebugMode
+          ? [localUrl, _deployedBaseUrl]
+          : [_deployedBaseUrl, localUrl];
     }
 
     try {
       if (Platform.isAndroid) {
-        return [
-          _deployedBaseUrl,
+        const localUrls = [
           'http://localhost:5000/api', // Physical device with adb reverse
           'http://10.0.2.2:5000/api', // Android Studio Emulator
           'http://10.82.163.170:5000/api', // Host machine Wi-Fi LAN IP
         ];
+        return kDebugMode
+            ? [...localUrls, _deployedBaseUrl]
+            : [_deployedBaseUrl, ...localUrls];
       }
     } catch (_) {
       // Ignore
     }
 
-    return [
-      _deployedBaseUrl,
+    const localUrls = [
       'http://localhost:5000/api',
       'http://127.0.0.1:5000/api',
       'http://10.82.163.170:5000/api',
     ];
+    return kDebugMode
+        ? [...localUrls, _deployedBaseUrl]
+        : [_deployedBaseUrl, ...localUrls];
   }
 
   /// Current base API URL

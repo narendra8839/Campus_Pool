@@ -1,5 +1,9 @@
 const prisma = require('../config/prisma');
-const normalisePlace = (value) => value.trim().replace(/\s+/g, ' ').toLowerCase();
+const {
+  getRideRouteCoordinates,
+  validateBookingRoutePoints,
+} = require('../services/bookingRoutePointService');
+const RIDE_GENDER_PREFERENCES = new Set(['any', 'male', 'female', 'other']);
 
 // @desc    Request a lift / book a seat
 // @route   POST /api/bookings
@@ -51,6 +55,20 @@ const createBooking = async (req, res, next) => {
       });
     }
 
+    const passengerGenderPreference = String(
+      ride.passengerGenderPreference || 'any',
+    ).toLowerCase();
+    if (
+      !RIDE_GENDER_PREFERENCES.has(passengerGenderPreference) ||
+      (passengerGenderPreference !== 'any' &&
+        req.user.gender?.toLowerCase() !== passengerGenderPreference)
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'Your gender does not match this ride’s passenger preference.',
+      });
+    }
+
     const requestedSeats = parseInt(seatsRequested, 10);
     if (!Number.isInteger(requestedSeats) || requestedSeats < 1) {
       return res.status(400).json({
@@ -67,22 +85,29 @@ const createBooking = async (req, res, next) => {
       });
     }
 
-    if (ride.corridorId) {
-      const [pickup, drop, rideOrigin, rideDestination] = await Promise.all([
-        prisma.corridorHub.findFirst({ where: { corridorId: ride.corridorId, hub: { normalizedName: normalisePlace(pickupName) } } }),
-        prisma.corridorHub.findFirst({ where: { corridorId: ride.corridorId, hub: { normalizedName: normalisePlace(dropName) } } }),
-        prisma.corridorHub.findUnique({ where: { corridorId_hubId: { corridorId: ride.corridorId, hubId: ride.originHubId } } }),
-        prisma.corridorHub.findUnique({ where: { corridorId_hubId: { corridorId: ride.corridorId, hubId: ride.destinationHubId } } }),
-      ]);
-      const direction = rideOrigin.sequence < rideDestination.sequence ? 1 : -1;
-      const followsDirection = pickup && drop && (pickup.sequence - drop.sequence) * direction < 0;
-      const withinRide = rideOrigin && rideDestination &&
-        (direction === 1
-          ? pickup.sequence >= rideOrigin.sequence && drop.sequence <= rideDestination.sequence
-          : pickup.sequence <= rideOrigin.sequence && drop.sequence >= rideDestination.sequence);
-      if (!followsDirection || !withinRide) {
-        return res.status(400).json({ success: false, message: 'Pickup and drop must be hubs in corridor order' });
-      }
+    const parseCoordinate = (value) =>
+      typeof value === 'number' || (typeof value === 'string' && value.trim())
+        ? Number(value)
+        : Number.NaN;
+    const parsedPickup = {
+      latitude: parseCoordinate(pickupLat),
+      longitude: parseCoordinate(pickupLng),
+    };
+    const parsedDropoff = {
+      latitude: parseCoordinate(dropLat),
+      longitude: parseCoordinate(dropLng),
+    };
+    const routeCoordinates = await getRideRouteCoordinates(ride);
+    const routePointError = validateBookingRoutePoints({
+      routeCoordinates,
+      pickup: parsedPickup,
+      dropoff: parsedDropoff,
+    });
+    if (routePointError) {
+      return res.status(400).json({
+        success: false,
+        message: routePointError,
+      });
     }
 
     // Check existing active booking
@@ -109,11 +134,11 @@ const createBooking = async (req, res, next) => {
         rideId,
         passengerId: req.user.id,
         pickupName,
-        pickupLat: parseFloat(pickupLat) || 0.0,
-        pickupLng: parseFloat(pickupLng) || 0.0,
+        pickupLat: parsedPickup.latitude,
+        pickupLng: parsedPickup.longitude,
         dropName,
-        dropLat: parseFloat(dropLat) || 0.0,
-        dropLng: parseFloat(dropLng) || 0.0,
+        dropLat: parsedDropoff.latitude,
+        dropLng: parsedDropoff.longitude,
         seatsRequested: requestedSeats,
         passengerNote: passengerNote || '',
         fareAmount: fare,
@@ -212,7 +237,19 @@ const respondToBooking = async (req, res, next) => {
         },
         include: {
           passenger: {
-            select: { id: true, name: true, phone: true, avatar: true },
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              avatar: true,
+              gender: true,
+              ratingAvg: true,
+              ratingCount: true,
+              isVerified: true,
+              college: true,
+              rollNumber: true,
+              emergencyPhone: true,
+            },
           },
           ride: true,
         },
@@ -312,8 +349,11 @@ const getMyBookings = async (req, res, next) => {
                 name: true,
                 phone: true,
                 ratingAvg: true,
+                ratingCount: true,
                 avatar: true,
                 college: true,
+                gender: true,
+                isVerified: true,
                 vehicleType: true,
                 vehicleModel: true,
                 vehiclePlate: true,
@@ -367,7 +407,10 @@ const getRideBookings = async (req, res, next) => {
             name: true,
             phone: true,
             ratingAvg: true,
+            ratingCount: true,
             avatar: true,
+            gender: true,
+            isVerified: true,
             college: true,
             rollNumber: true,
             emergencyPhone: true,
@@ -410,10 +453,11 @@ const getDriverBookings = async (req, res, next) => {
             ratingAvg: true,
             ratingCount: true,
             avatar: true,
+            gender: true,
+            isVerified: true,
             college: true,
             rollNumber: true,
             emergencyPhone: true,
-            isVerified: true,
           },
         },
         ride: true,

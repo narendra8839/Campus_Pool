@@ -1,4 +1,4 @@
-const { RoutingError, getRoute } = require('../services/osrmService');
+const { RoutingError, getRoutes } = require('../services/osrmService');
 
 function parseCoordinate(value, minimum, maximum) {
   if (typeof value !== 'string' || value.trim() === '') return null;
@@ -17,12 +17,29 @@ const route = async (req, res, next) => {
     latitude: parseCoordinate(req.query.destinationLat, -90, 90),
     longitude: parseCoordinate(req.query.destinationLon, -180, 180),
   };
+  const hasViaLatitude = req.query.viaLat !== undefined;
+  const hasViaLongitude = req.query.viaLon !== undefined;
+  if (hasViaLatitude !== hasViaLongitude) {
+    return res.status(400).json({
+      success: false,
+      message: 'Both viaLat and viaLon must be provided together.',
+    });
+  }
+  const viaPoints = hasViaLatitude
+    ? [{
+        latitude: parseCoordinate(req.query.viaLat, -90, 90),
+        longitude: parseCoordinate(req.query.viaLon, -180, 180),
+      }]
+    : [];
 
   if (
     origin.latitude === null ||
     origin.longitude === null ||
     destination.latitude === null ||
-    destination.longitude === null
+    destination.longitude === null ||
+    viaPoints.some(
+      (point) => point.latitude === null || point.longitude === null,
+    )
   ) {
     return res.status(400).json({
       success: false,
@@ -41,7 +58,11 @@ const route = async (req, res, next) => {
   }
 
   try {
-    const data = await getRoute(origin, destination);
+    const routes = await getRoutes(origin, destination, viaPoints);
+    const data = {
+      ...routes[0],
+      routes,
+    };
     return res.json({ success: true, data });
   } catch (error) {
     if (error instanceof RoutingError) {

@@ -35,6 +35,7 @@ class _FindRidesScreenState extends State<FindRidesScreen> {
   String _dateFilterMode = 'any'; // 'any', 'today', 'tomorrow', 'custom'
   int _selectedSeats = 1;
   String _selectedVehicleType = 'all'; // 'all', 'bike', 'scooty'
+  String _selectedDriverGender = 'any';
   SortOption _currentSort = SortOption.bestMatch;
 
   bool _isLoading = false;
@@ -169,6 +170,9 @@ class _FindRidesScreenState extends State<FindRidesScreen> {
     if (_selectedVehicleType != 'all') {
       queryParams['vehicleType'] = _selectedVehicleType;
     }
+    if (_selectedDriverGender != 'any') {
+      queryParams['driverGender'] = _selectedDriverGender;
+    }
     if (_selectedCorridor != null) {
       queryParams['corridorId'] = _selectedCorridor!.id;
     }
@@ -230,6 +234,7 @@ class _FindRidesScreenState extends State<FindRidesScreen> {
       _selectedDate = null;
       _selectedSeats = 1;
       _selectedVehicleType = 'all';
+      _selectedDriverGender = 'any';
       _currentSort = SortOption.bestMatch;
       _selectedCorridor = null;
     });
@@ -312,7 +317,7 @@ class _FindRidesScreenState extends State<FindRidesScreen> {
                 },
               ),
               RadioListTile<SortOption>(
-                title: const Text('Top Rated Driver'),
+                title: const Text('Top Rated Biker'),
                 value: SortOption.topRated,
                 groupValue: _currentSort,
                 activeColor: AppColors.primary,
@@ -323,9 +328,32 @@ class _FindRidesScreenState extends State<FindRidesScreen> {
                 },
               ),
               const SizedBox(height: AppSpacing.md),
+              DropdownButtonFormField<String>(
+                value: _selectedDriverGender,
+                decoration: const InputDecoration(
+                  labelText: 'Biker gender',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'any', child: Text('Any gender')),
+                  DropdownMenuItem(value: 'female', child: Text('Women')),
+                  DropdownMenuItem(value: 'male', child: Text('Men')),
+                  DropdownMenuItem(value: 'other', child: Text('Other')),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setModalState(() => _selectedDriverGender = value);
+                    setState(() => _selectedDriverGender = value);
+                  }
+                },
+              ),
+              const SizedBox(height: AppSpacing.md),
               AppPrimaryButton(
                 text: 'Apply',
-                onPressed: () => Navigator.pop(ctx),
+                onPressed: () {
+                  _searchRides();
+                  Navigator.pop(ctx);
+                },
               ),
             ],
           ),
@@ -352,7 +380,7 @@ class _FindRidesScreenState extends State<FindRidesScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.groups_rounded),
-            tooltip: 'Auto Groups',
+            tooltip: 'Share a Rickshaw',
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const AutoGroupsScreen()),
@@ -775,9 +803,9 @@ class _FindRidesScreenState extends State<FindRidesScreen> {
           final driver = ride.driver;
 
           return AppRideCard(
-            driverName: driver?.name.isNotEmpty ?? false
+            driverName: driver?.name.isNotEmpty == true
                 ? driver!.name
-                : 'Student Driver',
+                : 'Campus Biker',
             origin: ride.originName,
             destination: ride.destName,
             departureTime: _formatDateTime(ride.departureTime),
