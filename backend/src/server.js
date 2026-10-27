@@ -5,16 +5,12 @@ dotenv.config();
 
 const app = require('./app');
 const prisma = require('./config/prisma');
+const { assertRequiredEnvironment } = require('./utils/requiredEnvironment');
 
 const PORT = process.env.PORT || 5000;
 const DATABASE_CONNECT_ATTEMPTS = 3;
 
 async function connectToDatabase() {
-  if (!process.env.DATABASE_URL) {
-    console.warn('[Neon PostgreSQL] Warning: DATABASE_URL is not defined in .env');
-    return;
-  }
-
   let lastError;
   for (let attempt = 1; attempt <= DATABASE_CONNECT_ATTEMPTS; attempt += 1) {
     try {
@@ -38,6 +34,7 @@ async function connectToDatabase() {
 
 async function startServer() {
   try {
+    assertRequiredEnvironment();
     await connectToDatabase();
     const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`===================================================`);

@@ -12,9 +12,10 @@ datasource db {
 
 model User {
   id         String   @id @default(uuid())
+  firebaseUid String? @unique
   name       String
   email      String   @unique
-  password   String
+  password   String?
   phone      String
   college    String?  @default("")
   rollNumber String?  @default("")

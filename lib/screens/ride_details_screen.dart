@@ -9,6 +9,7 @@ import '../services/routing_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import '../utils/ride_fare.dart';
 import 'map/ride_route_preview_map.dart';
 import 'map/ride_route_point_picker_screen.dart';
 import 'rides/my_rides_screen.dart';
@@ -36,6 +37,10 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
   List<List<double>> _routeCoordinates = const [];
   String? _routeLoadError;
   bool _isLoadingRoute = false;
+  double? _farePerSeat;
+  String? _fareLoadError;
+  bool _isLoadingFare = false;
+  int _fareRequestId = 0;
   int _seatsToBook = 1;
   bool _isSubmittingBooking = false;
 
@@ -59,6 +64,7 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
       'drop-off',
     );
     _fetchFreshDetails();
+    _refreshBookingFare();
   }
 
   GeocodingResult? _endpointPlace(
@@ -107,6 +113,47 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
         _dropController.text = selectedPlace.displayName;
       }
     });
+    _refreshBookingFare();
+  }
+
+  Future<void> _refreshBookingFare() async {
+    final requestId = ++_fareRequestId;
+    final pickup = _pickupPlace;
+    final dropoff = _dropPlace;
+    if (pickup == null || dropoff == null) {
+      setState(() {
+        _farePerSeat = null;
+        _fareLoadError = null;
+        _isLoadingFare = false;
+      });
+      return;
+    }
+
+    setState(() {
+      _farePerSeat = null;
+      _fareLoadError = null;
+      _isLoadingFare = true;
+    });
+    try {
+      final route = await RoutingService.getDrivingRoute(
+        originLatitude: pickup.latitude,
+        originLongitude: pickup.longitude,
+        destinationLatitude: dropoff.latitude,
+        destinationLongitude: dropoff.longitude,
+      );
+      if (!mounted || requestId != _fareRequestId) return;
+      setState(() {
+        _farePerSeat = estimateRideFare(route.distanceMeters);
+        _isLoadingFare = false;
+      });
+    } catch (error) {
+      if (!mounted || requestId != _fareRequestId) return;
+      setState(() {
+        _fareLoadError =
+            'Could not calculate the fare for these points: $error';
+        _isLoadingFare = false;
+      });
+    }
   }
 
   @override
@@ -203,6 +250,16 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
       !(ride.originLat == ride.destLat && ride.originLng == ride.destLng);
 
   Future<void> _sendBookingRequest() async {
+    if (_isLoadingFare) {
+      _showBookingError('Please wait while your route fare is calculated.');
+      return;
+    }
+    if (_farePerSeat == null) {
+      _showBookingError(
+        _fareLoadError ?? 'The fare for your selected route is unavailable.',
+      );
+      return;
+    }
     if (_isLoadingRoute) {
       _showBookingError('Please wait while the biker’s route map loads.');
       return;
@@ -355,7 +412,9 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     final hasSeats = _ride.availableSeats > 0;
-    final totalCalculatedFare = _ride.contribution * _seatsToBook;
+    final totalCalculatedFare = _farePerSeat == null
+        ? null
+        : _farePerSeat! * _seatsToBook;
     final driver = _ride.driver;
 
     return Scaffold(
@@ -881,9 +940,9 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: _buildSpecTile(
-                  'Rate / Seat',
+                  'Full route / seat',
                   _ride.contribution > 0
-                      ? '₹${_ride.contribution.toStringAsFixed(0)}'
+                      ? '₹${_ride.contribution.toStringAsFixed(2)}'
                       : 'Free',
                   Icons.payments_outlined,
                 ),
@@ -1155,6 +1214,65 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
           ),
           const SizedBox(height: AppSpacing.md),
 
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(AppSpacing.sm),
+            decoration: BoxDecoration(
+              color: AppColors.primaryContainer.withValues(alpha: 0.1),
+              borderRadius: AppSpacing.radiusSm,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Fare for your selected route',
+                  style: AppTypography.labelMd.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                if (_isLoadingFare)
+                  const Row(
+                    children: [
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      SizedBox(width: 8),
+                      Text('Calculating route fare…'),
+                    ],
+                  )
+                else if (_fareLoadError != null)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _fareLoadError!,
+                        style: AppTypography.bodySm.copyWith(
+                          color: AppColors.error,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _refreshBookingFare,
+                        child: const Text('Retry fare calculation'),
+                      ),
+                    ],
+                  )
+                else if (_farePerSeat != null)
+                  Text(
+                    '₹${_farePerSeat!.toStringAsFixed(2)} per seat · '
+                    '₹${(_farePerSeat! * _seatsToBook).toStringAsFixed(2)} '
+                    'for $_seatsToBook seat(s)',
+                    style: AppTypography.bodySm.copyWith(
+                      color: AppColors.onSurfaceVariant,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+
           // Note to Driver
           AppTextField(
             controller: _noteController,
@@ -1197,7 +1315,7 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
   }
 
   // ── Sticky Bottom Bar ─────────────────────────────────────────────────────
-  Widget _buildStickyBottomBar(bool hasSeats, double totalFare) {
+  Widget _buildStickyBottomBar(bool hasSeats, double? totalFare) {
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.marginMobile,
@@ -1230,12 +1348,16 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
                   ),
                 ),
                 Text(
-                  totalFare > 0
-                      ? '₹${totalFare.toStringAsFixed(0)}'
-                      : 'Free Ride',
+                  _isLoadingFare
+                      ? 'Calculating…'
+                      : totalFare == null
+                      ? 'Unavailable'
+                      : '₹${totalFare.toStringAsFixed(2)}',
                   style: AppTypography.headlineSm.copyWith(
                     fontWeight: FontWeight.bold,
-                    color: totalFare > 0
+                    color: totalFare == null || _isLoadingFare
+                        ? AppColors.onSurfaceVariant
+                        : totalFare > 0
                         ? AppColors.onSurface
                         : AppColors.secondary,
                   ),
@@ -1248,7 +1370,9 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
                 text: hasSeats ? 'Request Lift ($_seatsToBook)' : 'Ride Full',
                 icon: Icons.hail_rounded,
                 isLoading: _isSubmittingBooking,
-                onPressed: hasSeats ? _sendBookingRequest : null,
+                onPressed: hasSeats && !_isLoadingFare && _farePerSeat != null
+                    ? _sendBookingRequest
+                    : null,
               ),
             ),
           ],

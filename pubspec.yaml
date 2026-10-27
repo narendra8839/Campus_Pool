@@ -40,6 +40,9 @@ dependencies:
   maplibre_gl: ^0.27.1
   pointer_interceptor: ^0.10.1+2
   geolocator: ^14.0.2
+  # Keep Firebase versions compatible with the app's Android minSdk 23.
+  firebase_core: 4.1.1
+  firebase_auth: 6.1.0
 
 dev_dependencies:
   flutter_test:

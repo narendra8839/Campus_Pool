@@ -22,6 +22,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
+  bool _requiresVerification = false;
   String? _errorMessage;
   bool _hasShownExpiryMessage = false;
 
@@ -60,6 +61,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _requiresVerification = false;
     });
 
     try {
@@ -69,7 +71,10 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       if (!mounted) return;
-      setState(() => _isLoading = false);
+      setState(() {
+        _isLoading = false;
+        _requiresVerification = false;
+      });
 
       final loginArgs = ModalRoute.of(context)?.settings.arguments;
       final returnRoute = loginArgs is LoginRouteArguments
@@ -81,6 +86,7 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() {
         _isLoading = false;
         _errorMessage = e.toString();
+        _requiresVerification = e is EmailVerificationRequiredException;
       });
 
       ScaffoldMessenger.of(context)
@@ -94,11 +100,47 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  void _showForgotPasswordDialog() {
+  Future<void> _resendVerificationLink() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    try {
+      await AuthService.resendVerificationLink(
+        email: _emailController.text,
+        password: _passwordController.text,
+      );
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _requiresVerification = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('A new verification link has been sent.'),
+          backgroundColor: AppColors.secondary,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = error.toString();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString()),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _showForgotPasswordDialog() async {
     final resetEmailController = TextEditingController(
       text: _emailController.text.trim(),
     );
-    showDialog(
+    await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: AppSpacing.radiusLg),
@@ -120,7 +162,7 @@ class _LoginScreenState extends State<LoginScreen> {
             AppTextField(
               controller: resetEmailController,
               label: 'Campus Email',
-              hintText: 'student@university.edu',
+              hintText: 'firstname.lastname@vit.edu',
               keyboardType: TextInputType.emailAddress,
               prefixIcon: const Icon(Icons.mail_outline_rounded),
             ),
@@ -137,17 +179,32 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
+              final email = resetEmailController.text;
               Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Password reset instructions sent to your email.',
+              try {
+                await AuthService.sendPasswordResetEmail(email);
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'If this account exists, password reset instructions are on the way.',
+                    ),
+                    behavior: SnackBarBehavior.floating,
+                    backgroundColor: AppColors.secondary,
                   ),
-                  behavior: SnackBarBehavior.floating,
-                  backgroundColor: AppColors.secondary,
-                ),
-              );
+                );
+              } catch (error) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(error.toString()),
+                    behavior: SnackBarBehavior.floating,
+                    backgroundColor: AppColors.error,
+                  ),
+                );
+                resetEmailController.dispose();
+              }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
@@ -230,8 +287,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             controller: _emailController,
                             label: 'Campus Email',
                             hintText: 'firstname.lastname@vit.edu',
-                            helperText:
-                                'Synthetic test accounts also use @synthetic.campus.pool',
+                            helperText: 'Use your verified @vit.edu email',
                             keyboardType: TextInputType.emailAddress,
                             textInputAction: TextInputAction.next,
                             prefixIcon: const Icon(Icons.mail_outline_rounded),
@@ -240,12 +296,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                 return 'Email is required';
                               }
                               final email = value.trim().toLowerCase();
-                              final isCampusEmail = email.endsWith('@vit.edu');
-                              final isSyntheticEmail = email.endsWith(
-                                '@synthetic.campus.pool',
-                              );
-                              if (!isCampusEmail && !isSyntheticEmail) {
-                                return 'Use your @vit.edu email or a synthetic test account email';
+                              if (!email.endsWith('@vit.edu')) {
+                                return 'Only @vit.edu accounts can use Campus Pool';
                               }
                               return null;
                             },
@@ -303,6 +355,17 @@ class _LoginScreenState extends State<LoginScreen> {
                             isLoading: _isLoading,
                             onPressed: _handleLogin,
                           ),
+                          if (_requiresVerification) ...[
+                            const SizedBox(height: AppSpacing.xs),
+                            Center(
+                              child: TextButton(
+                                onPressed: _isLoading
+                                    ? null
+                                    : _resendVerificationLink,
+                                child: const Text('Resend verification email'),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),

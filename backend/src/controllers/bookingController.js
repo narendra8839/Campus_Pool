@@ -3,6 +3,13 @@ const {
   getRideRouteCoordinates,
   validateBookingRoutePoints,
 } = require('../services/bookingRoutePointService');
+const { priceRide } = require('../services/ridePricingService');
+const {
+  BookingConflictError,
+  cancelBooking: cancelBookingTransaction,
+  respondToBooking: transitionBooking,
+} = require('../services/bookingApprovalService');
+const { withoutVerificationOtp } = require('../utils/bookingPrivacy');
 const RIDE_GENDER_PREFERENCES = new Set(['any', 'male', 'female', 'other']);
 
 // @desc    Request a lift / book a seat
@@ -110,55 +117,68 @@ const createBooking = async (req, res, next) => {
       });
     }
 
-    // Check existing active booking
-    const existingBooking = await prisma.booking.findFirst({
-      where: {
-        rideId,
-        passengerId: req.user.id,
-        status: { in: ['PENDING', 'ACCEPTED'] },
-      },
+    const { contribution: farePerSeat } = await priceRide({
+      origin: parsedPickup,
+      destination: parsedDropoff,
+    });
+    const fare = farePerSeat * requestedSeats;
+    const otp = Math.floor(1000 + Math.random() * 9000).toString();
+
+    const booking = await prisma.$transaction(async (tx) => {
+      // Serialize requests by passenger and ride to prevent duplicate active
+      // bookings when two submissions arrive at the same time.
+      const lockKey = `booking:${rideId}:${req.user.id}`;
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+
+      const existingBooking = await tx.booking.findFirst({
+        where: {
+          rideId,
+          passengerId: req.user.id,
+          status: { in: ['PENDING', 'ACCEPTED'] },
+        },
+        select: { id: true },
+      });
+
+      if (existingBooking) return null;
+
+      return tx.booking.create({
+        data: {
+          rideId,
+          passengerId: req.user.id,
+          pickupName,
+          pickupLat: parsedPickup.latitude,
+          pickupLng: parsedPickup.longitude,
+          dropName,
+          dropLat: parsedDropoff.latitude,
+          dropLng: parsedDropoff.longitude,
+          seatsRequested: requestedSeats,
+          passengerNote: passengerNote || '',
+          fareAmount: fare,
+          verificationOtp: otp,
+        },
+        include: {
+          passenger: {
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              avatar: true,
+              rollNumber: true,
+              college: true,
+              ratingAvg: true,
+            },
+          },
+          ride: true,
+        },
+      });
     });
 
-    if (existingBooking) {
+    if (!booking) {
       return res.status(400).json({
         success: false,
         message: 'You already have an active request or booking for this ride',
       });
     }
-
-    const otp = Math.floor(1000 + Math.random() * 9000).toString();
-    const fare = (ride.contribution || 0) * requestedSeats;
-
-    const booking = await prisma.booking.create({
-      data: {
-        rideId,
-        passengerId: req.user.id,
-        pickupName,
-        pickupLat: parsedPickup.latitude,
-        pickupLng: parsedPickup.longitude,
-        dropName,
-        dropLat: parsedDropoff.latitude,
-        dropLng: parsedDropoff.longitude,
-        seatsRequested: requestedSeats,
-        passengerNote: passengerNote || '',
-        fareAmount: fare,
-        verificationOtp: otp,
-      },
-      include: {
-        passenger: {
-          select: {
-            id: true,
-            name: true,
-            phone: true,
-            avatar: true,
-            rollNumber: true,
-            college: true,
-            ratingAvg: true,
-          },
-        },
-        ride: true,
-      },
-    });
 
     res.status(201).json({
       success: true,
@@ -211,57 +231,22 @@ const respondToBooking = async (req, res, next) => {
       });
     }
 
-    const updatedBooking = await prisma.$transaction(async (tx) => {
-      if (status === 'ACCEPTED') {
-        const currentRide = await tx.ride.findUnique({
-          where: { id: booking.rideId },
-        });
-
-        if (currentRide.availableSeats < booking.seatsRequested) {
-          throw new Error('Not enough seats available to accept this request');
-        }
-
-        await tx.ride.update({
-          where: { id: booking.rideId },
-          data: {
-            availableSeats: currentRide.availableSeats - booking.seatsRequested,
-          },
-        });
-      }
-
-      return await tx.booking.update({
-        where: { id: req.params.id },
-        data: {
-          status,
-          driverResponseNote: driverResponseNote || booking.driverResponseNote,
-        },
-        include: {
-          passenger: {
-            select: {
-              id: true,
-              name: true,
-              phone: true,
-              avatar: true,
-              gender: true,
-              ratingAvg: true,
-              ratingCount: true,
-              isVerified: true,
-              college: true,
-              rollNumber: true,
-              emergencyPhone: true,
-            },
-          },
-          ride: true,
-        },
-      });
-    });
+    const updatedBooking = await prisma.$transaction(async (tx) =>
+      transitionBooking(tx, booking, status, driverResponseNote),
+    );
 
     res.json({
       success: true,
       message: `Booking request ${status.toLowerCase()} successfully`,
-      data: updatedBooking,
+      data: withoutVerificationOtp(updatedBooking),
     });
   } catch (error) {
+    if (error instanceof BookingConflictError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
     next(error);
   }
 };
@@ -300,35 +285,22 @@ const cancelBooking = async (req, res, next) => {
       });
     }
 
-    const cancelledBooking = await prisma.$transaction(async (tx) => {
-      if (booking.status === 'ACCEPTED') {
-        const currentRide = await tx.ride.findUnique({
-          where: { id: booking.rideId },
-        });
-        if (currentRide) {
-          const restoredSeats = Math.min(
-            currentRide.totalSeats,
-            currentRide.availableSeats + booking.seatsRequested
-          );
-          await tx.ride.update({
-            where: { id: booking.rideId },
-            data: { availableSeats: restoredSeats },
-          });
-        }
-      }
-
-      return await tx.booking.update({
-        where: { id: req.params.id },
-        data: { status: 'CANCELLED' },
-      });
-    });
+    const cancelledBooking = await prisma.$transaction((tx) =>
+      cancelBookingTransaction(tx, booking),
+    );
 
     res.json({
       success: true,
       message: 'Booking cancelled successfully',
-      data: cancelledBooking,
+      data: withoutVerificationOtp(cancelledBooking),
     });
   } catch (error) {
+    if (error instanceof BookingConflictError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
     next(error);
   }
 };
@@ -368,7 +340,7 @@ const getMyBookings = async (req, res, next) => {
     res.json({
       success: true,
       count: bookings.length,
-      data: bookings,
+      data: bookings.map(withoutVerificationOtp),
     });
   } catch (error) {
     next(error);
@@ -423,7 +395,7 @@ const getRideBookings = async (req, res, next) => {
     res.json({
       success: true,
       count: bookings.length,
-      data: bookings,
+      data: bookings.map(withoutVerificationOtp),
     });
   } catch (error) {
     next(error);
@@ -517,7 +489,7 @@ const verifyBookingOtp = async (req, res, next) => {
     res.json({
       success: true,
       message: 'Passenger OTP verified successfully! Boarding confirmed.',
-      data: booking,
+      data: withoutVerificationOtp(booking),
     });
   } catch (error) {
     next(error);

@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -15,11 +14,11 @@ class ApiException implements Exception {
 }
 
 class ApiService {
-  static const String _tokenKey = 'auth_jwt_token';
   static const String _deployedBaseUrl =
       'https://campus-pool-gamma.vercel.app/api';
   static String? _workingBaseUrl;
   static Future<void> Function()? onUnauthorized;
+  static Future<String?> Function()? idTokenProvider;
   static bool _unauthorizedHandled = false;
 
   /// Candidate base URLs in order of preference
@@ -76,27 +75,11 @@ class ApiService {
   /// Current base API URL
   static String get baseUrl => _workingBaseUrl ?? _candidateBaseUrls.first;
 
-  /// Get stored JWT token
-  static Future<String?> getToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_tokenKey);
-  }
-
-  /// Save JWT token
-  static Future<void> saveToken(String token) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_tokenKey, token);
-    // A fresh login starts a new session, so a future expiry must be handled.
+  static void resetUnauthorizedState() {
     _unauthorizedHandled = false;
   }
 
-  /// Clear stored JWT token
-  static Future<void> clearToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_tokenKey);
-  }
-
-  /// Default headers with optional JWT authorization
+  /// Default headers with the current Firebase ID token when authentication is required.
   static Future<Map<String, String>> _headers({
     bool requiresAuth = false,
   }) async {
@@ -106,7 +89,7 @@ class ApiService {
     };
 
     if (requiresAuth) {
-      final token = await getToken();
+      final token = await idTokenProvider?.call();
       if (token != null && token.isNotEmpty) {
         headers['Authorization'] = 'Bearer $token';
       }

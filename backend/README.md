@@ -20,7 +20,7 @@ backend/
 │   │   ├── bookingController.js   # Lift requests, accept/reject, cancellations
 │   │   └── reviewController.js    # Star ratings & user reviews
 │   ├── middleware/
-│   │   ├── authMiddleware.js      # JWT authentication guard
+│   │   ├── authMiddleware.js      # Firebase ID-token authentication guard
 │   │   └── errorMiddleware.js     # 404 & centralized error handler (handles Prisma codes)
 │   ├── routes/
 │   │   ├── authRoutes.js          # /api/auth
@@ -28,8 +28,8 @@ backend/
 │   │   ├── rideRoutes.js          # /api/rides
 │   │   ├── bookingRoutes.js       # /api/bookings
 │   │   └── reviewRoutes.js        # /api/reviews
-│   ├── utils/
-│   │   └── generateToken.js       # JWT signing utility
+│   ├── services/
+│   │   └── firebaseAdminService.js # Firebase Admin initialization
 │   ├── app.js                     # Express app setup & middleware stack
 │   └── server.js                  # Entry point listener
 ├── .env.example                   # Environment configuration template
@@ -94,11 +94,29 @@ In `backend/.env`, set your `DATABASE_URL` from your Neon console:
 PORT=5000
 NODE_ENV=development
 DATABASE_URL="postgresql://neondb_owner:YOUR_PASSWORD@ep-xyz.us-east-2.aws.neon.tech/neondb?sslmode=require"
-JWT_SECRET=campus_pool_jwt_super_secret_key_2026
-JWT_EXPIRES_IN=30d
-ALLOWED_EMAIL_DOMAIN=
+FIREBASE_PROJECT_ID=your-firebase-project-id
+# Optional: set through a secret manager, or use Application Default Credentials.
+FIREBASE_SERVICE_ACCOUNT_JSON=
 NOMINATIM_USER_AGENT="CampusPool/1.0 (contact: your-email@example.com)"
 ```
+
+Enable Email/Password sign-in in Firebase Authentication. The backend requires
+`FIREBASE_PROJECT_ID` and accepts only Firebase ID tokens with a verified
+`@vit.edu` email. For local development, use Application Default Credentials
+or set `FIREBASE_SERVICE_ACCOUNT_JSON` from a securely stored service-account
+secret; never commit service-account credentials.
+
+The Flutter client sends Firebase verification links. Android requires the
+matching `google-services.json`; configure each additional platform with its
+own Firebase app configuration before building for it.
+
+Firebase accounts are added to the application database only after email
+verification. Existing synthetic/legacy rows are preserved and are never
+automatically linked to Firebase identities. Before deployment, apply the
+additive Prisma schema change for `users.firebaseUid` and nullable
+`users.password` to the intended database. Confirm the target and back it up
+before running `npx prisma db push`; do not point schema changes at production
+unintentionally.
 
 If Neon closes an idle pooled connection, restart the backend; startup retries
 the database connection up to three times before failing clearly. For local
@@ -213,10 +231,12 @@ distance and stores the returned road geometry as ride waypoints; a routing
 provider error prevents the ride from being created rather than silently
 quoting a straight-line fare. When coordinates are unavailable, the backend
 retains the legacy waypoint/straight-line estimate. A booking's total is the
-per-seat route fare multiplied by the number of requested seats; client
-submitted contribution values are ignored. The Offer Ride form previews the
-road distance and per-seat fare, and the selected route is drawn on the Home
-map.
+per-seat fare for the seeker's selected pickup-to-drop-off road segment
+multiplied by the number of requested seats; client submitted contribution
+values are ignored. The seeker sees an estimate for the selected segment, and
+the backend recalculates the fare when the booking is submitted. The Offer
+Ride form previews the full-route fare, and the selected route is drawn on the
+Home map.
 
 To generate larger deterministic JSON and CSV datasets for analysis or bulk
 loading, run:
@@ -347,28 +367,20 @@ in the same direction.
 ### 🔐 Authentication (`/api/auth`)
 | Method | Endpoint | Description | Auth Required |
 | :--- | :--- | :--- | :---: |
-| `POST` | `/api/auth/register` | Register new student account | No |
-| `POST` | `/api/auth/login` | Authenticate student and get JWT | No |
-| `GET` | `/api/auth/me` | Get current logged-in user info | Yes (Bearer) |
+| `POST` | `/api/auth/profile` | Provision a verified Firebase student profile | Yes (Firebase Bearer token) |
+| `GET` | `/api/auth/me` | Get current logged-in user info | Yes (Firebase Bearer token) |
 
-#### Example Register Request:
+Signup, password login, email verification/resend, and password reset are
+handled by Firebase Authentication in the Flutter client. After verification,
+the client provisions the application profile using the Firebase ID token:
 ```json
-POST /api/auth/register
+POST /api/auth/profile
 {
   "name": "Rahul Sharma",
-  "email": "rahul.sharma@college.edu",
-  "password": "Password@123",
-  "phone": "+919876543210",
-  "college": "Engineering College",
-  "rollNumber": "CS202401",
   "gender": "male",
-  "vehicle": {
-    "type": "bike",
-    "model": "Royal Enfield Classic 350",
-    "plateNumber": "MH12AB1234",
-    "helmetProvided": true,
-    "totalSeats": 1
-  }
+  "phone": "+919876543210",
+  "college": "VIT Pune",
+  "rollNumber": "CS202401"
 }
 ```
 

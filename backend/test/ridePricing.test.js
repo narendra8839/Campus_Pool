@@ -36,6 +36,29 @@ test('prices valid coordinates from OSRM road distance and stores its geometry',
   ]);
 });
 
+test('prices a booking from the seeker pickup and drop-off segment', async () => {
+  let requestedOrigin;
+  let requestedDestination;
+  const result = await priceRide(
+    {
+      origin: { latitude: 18.02, longitude: 73.02 },
+      destination: { latitude: 18.06, longitude: 73.06 },
+    },
+    async (origin, destination) => {
+      requestedOrigin = origin;
+      requestedDestination = destination;
+      return {
+        distanceMeters: 4000,
+        coordinates: [[73.02, 18.02], [73.06, 18.06]],
+      };
+    },
+  );
+
+  assert.deepEqual(requestedOrigin, { latitude: 18.02, longitude: 73.02 });
+  assert.deepEqual(requestedDestination, { latitude: 18.06, longitude: 73.06 });
+  assert.equal(result.contribution, 20);
+});
+
 test('prices and stores the selected alternative while routing through a via point', async () => {
   let requestedViaPoints;
   const result = await priceRide(

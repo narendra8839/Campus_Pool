@@ -144,6 +144,13 @@ const createReview = async (req, res, next) => {
       });
     }
 
+    if (ride.status !== 'COMPLETED') {
+      return res.status(400).json({
+        success: false,
+        message: 'You can review users after the ride is completed.',
+      });
+    }
+
     // Check if reviewer and reviewee were part of this ride
     const isReviewerDriver = ride.driverId === req.user.id;
     const isRevieweeDriver = ride.driverId === revieweeId;
@@ -155,7 +162,7 @@ const createReview = async (req, res, next) => {
         where: {
           rideId,
           passengerId: revieweeId,
-          status: { in: ['ACCEPTED', 'COMPLETED'] },
+          status: 'COMPLETED',
         },
       });
       if (booking) isAuthorized = true;
@@ -165,7 +172,7 @@ const createReview = async (req, res, next) => {
         where: {
           rideId,
           passengerId: req.user.id,
-          status: { in: ['ACCEPTED', 'COMPLETED'] },
+          status: 'COMPLETED',
         },
       });
       if (booking) isAuthorized = true;

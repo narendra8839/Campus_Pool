@@ -1,140 +1,143 @@
-const bcrypt = require('bcryptjs');
 const prisma = require('../config/prisma');
-const generateToken = require('../utils/generateToken');
+const { validateFirebaseIdentity } = require('../utils/firebaseIdentity');
 
-// @desc    Register a new student user
-// @route   POST /api/auth/register
-// @access  Public
-const registerUser = async (req, res, next) => {
+const PROFILE_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  phone: true,
+  college: true,
+  rollNumber: true,
+  gender: true,
+  avatar: true,
+  roles: true,
+  vehicleType: true,
+  vehicleModel: true,
+  vehiclePlate: true,
+  vehicleColor: true,
+  helmetProvided: true,
+  vehicleSeats: true,
+  emergencyName: true,
+  emergencyPhone: true,
+  emergencyRelation: true,
+  ratingAvg: true,
+  ratingCount: true,
+  isVerified: true,
+  createdAt: true,
+};
+
+const VALID_GENDERS = new Set([
+  'prefer_not_to_say',
+  'male',
+  'female',
+  'other',
+]);
+
+function optionalText(value, field, maximumLength) {
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'string' || value.trim().length > maximumLength) {
+    const error = new Error(`${field} must be a string with at most ${maximumLength} characters.`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return value.trim();
+}
+
+async function provisionFirebaseProfile(req, res, next) {
   try {
-    const {
-      name,
-      email,
-      password,
-      phone,
-      college,
-      rollNumber,
-      gender,
-      roles,
-      vehicle,
-    } = req.body;
-
-    if (!name || !email || !password || !phone) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide all required fields: name, email, password, phone',
-      });
+    const identity = req.firebaseIdentity;
+    const validation = validateFirebaseIdentity(identity);
+    if (!validation.valid) {
+      return res.status(403).json({ success: false, message: validation.message });
     }
 
-    // Optional college domain validation if specified in .env
-    const allowedDomain = process.env.ALLOWED_EMAIL_DOMAIN;
-    if (allowedDomain && !email.toLowerCase().endsWith(allowedDomain.toLowerCase())) {
-      return res.status(400).json({
-        success: false,
-        message: `Only email addresses ending with ${allowedDomain} are permitted.`,
-      });
-    }
-
-    // Check if user already exists
-    const userExists = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
+    const existingByUid = await prisma.user.findUnique({
+      where: { firebaseUid: identity.uid },
+      select: PROFILE_SELECT,
     });
+    if (existingByUid) {
+      if (existingByUid.email.toLowerCase() !== validation.email) {
+        return res.status(409).json({
+          success: false,
+          message: 'Your verified email changed. Contact support to update your account safely.',
+        });
+      }
+      return res.json({ success: true, data: existingByUid });
+    }
 
-    if (userExists) {
-      return res.status(400).json({
+    const existingByEmail = await prisma.user.findUnique({
+      where: { email: validation.email },
+      select: { id: true },
+    });
+    if (existingByEmail) {
+      return res.status(409).json({
         success: false,
-        message: 'A user with this email already exists',
+        message: 'This email is already attached to an existing account. Contact support; accounts are not automatically linked.',
       });
     }
 
-    // Hash password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const name = optionalText(
+      req.body.name ?? identity.name ?? validation.email.split('@')[0],
+      'name',
+      100,
+    );
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        message: 'A name is required to create your student profile.',
+      });
+    }
+    const phone = optionalText(req.body.phone, 'phone', 32);
+    const college = optionalText(req.body.college ?? 'VIT Pune', 'college', 120);
+    const rollNumber = optionalText(req.body.rollNumber, 'rollNumber', 64);
+    const requestedGender = req.body.gender ?? 'prefer_not_to_say';
+    const gender = typeof requestedGender === 'string'
+      ? requestedGender.trim().toLowerCase()
+      : '';
+    if (!VALID_GENDERS.has(gender)) {
+      return res.status(400).json({
+        success: false,
+        message: 'gender must be prefer_not_to_say, male, female, or other.',
+      });
+    }
 
-    // Create user in PostgreSQL
     const user = await prisma.user.create({
       data: {
+        firebaseUid: identity.uid,
         name,
-        email: email.toLowerCase(),
-        password: hashedPassword,
+        email: validation.email,
+        password: null,
         phone,
-        college: college || '',
-        rollNumber: rollNumber || '',
-        gender: gender || 'prefer_not_to_say',
-        roles: roles || ['rider', 'driver'],
-        vehicleType: vehicle?.type || 'bike',
-        vehicleModel: vehicle?.model || '',
-        vehiclePlate: vehicle?.plateNumber || '',
-        vehicleColor: vehicle?.color || '',
-        helmetProvided: vehicle?.helmetProvided ?? true,
-        vehicleSeats: vehicle?.totalSeats || 1,
+        college,
+        rollNumber,
+        gender,
+        avatar: typeof identity.picture === 'string' ? identity.picture : '',
+        roles: ['rider', 'driver'],
+        isVerified: true,
       },
+      select: PROFILE_SELECT,
     });
-
-    const { password: _, ...userWithoutPassword } = user;
-
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
-      message: 'User registered successfully',
-      data: {
-        ...userWithoutPassword,
-        token: generateToken(user.id),
-      },
+      message: 'Verified student profile created.',
+      data: user,
     });
   } catch (error) {
-    next(error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
+    if (error.code === 'P2002') {
+      return res.status(409).json({
+        success: false,
+        message: 'An account already exists for this email or Firebase identity.',
+      });
+    }
+    return next(error);
   }
-};
-
-// @desc    Authenticate user & get token
-// @route   POST /api/auth/login
-// @access  Public
-const loginUser = async (req, res, next) => {
-  try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide email and password',
-      });
-    }
-
-    // Check for user
-    const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
-    });
-
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid email or password',
-      });
-    }
-
-    // Check password
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid email or password',
-      });
-    }
-
-    const { password: _, ...userWithoutPassword } = user;
-
-    res.json({
-      success: true,
-      message: 'Login successful',
-      data: {
-        ...userWithoutPassword,
-        token: generateToken(user.id),
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-};
+}
 
 // @desc    Get current logged in user details
 // @route   GET /api/auth/me
@@ -144,30 +147,7 @@ const getMe = async (req, res, next) => {
     const [user, ratingSummary] = await Promise.all([
       prisma.user.findUnique({
         where: { id: req.user.id },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          phone: true,
-          college: true,
-          rollNumber: true,
-          gender: true,
-          avatar: true,
-          roles: true,
-          vehicleType: true,
-          vehicleModel: true,
-          vehiclePlate: true,
-          vehicleColor: true,
-          helmetProvided: true,
-          vehicleSeats: true,
-          emergencyName: true,
-          emergencyPhone: true,
-          emergencyRelation: true,
-          ratingAvg: true,
-          ratingCount: true,
-          isVerified: true,
-          createdAt: true,
-        },
+        select: PROFILE_SELECT,
       }),
       prisma.review.aggregate({
         where: { revieweeId: req.user.id },
@@ -191,8 +171,4 @@ const getMe = async (req, res, next) => {
   }
 };
 
-module.exports = {
-  registerUser,
-  loginUser,
-  getMe,
-};
+module.exports = { getMe, provisionFirebaseProfile };

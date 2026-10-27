@@ -4,7 +4,6 @@ import '../../services/auth_service.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_spacing.dart';
 import '../../theme/app_typography.dart';
-import '../navigation/main_navigation_shell.dart';
 
 /// CampusFlow Registration Screen for VIT Students
 class RegistrationScreen extends StatefulWidget {
@@ -49,7 +48,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final user = await AuthService.register(
+      await AuthService.register(
         name: _nameController.text.trim(),
         email: _emailController.text.trim(),
         password: _passwordController.text,
@@ -57,27 +56,30 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         college: _collegeController.text.trim(),
         rollNumber: _rollNumberController.text.trim(),
         gender: _selectedGender,
-        roles: const ['rider', 'driver'], // Unified role for all campus students
       );
 
       if (!mounted) return;
       setState(() => _isLoading = false);
 
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text('Account created successfully! Welcome, ${user.name}.'),
-            backgroundColor: AppColors.secondary,
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Verify your student email'),
+          content: Text(
+            'We sent a verification link to ${_emailController.text.trim()}. '
+            'Open it before logging in. Check your spam folder if it is not in your inbox.',
           ),
-        );
-
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(
-          builder: (context) => const MainNavigationShell(initialIndex: 0),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                Navigator.pop(context);
+              },
+              child: const Text('Back to login'),
+            ),
+          ],
         ),
-        (route) => false,
       );
     } catch (e) {
       if (!mounted) return;
@@ -150,7 +152,9 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                             label: 'Full Name',
                             hintText: 'Jane Doe',
                             textInputAction: TextInputAction.next,
-                            prefixIcon: const Icon(Icons.person_outline_rounded),
+                            prefixIcon: const Icon(
+                              Icons.person_outline_rounded,
+                            ),
                             validator: (value) {
                               if (value == null || value.trim().isEmpty) {
                                 return 'Please enter your full name';
@@ -166,7 +170,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                             controller: _emailController,
                             label: 'VIT Campus Email',
                             hintText: 'firstname.lastname@vit.edu',
-                            helperText: 'Only official @vit.edu emails are allowed',
+                            helperText:
+                                'Only official @vit.edu emails are allowed',
                             keyboardType: TextInputType.emailAddress,
                             textInputAction: TextInputAction.next,
                             prefixIcon: const Icon(Icons.mail_outline_rounded),
@@ -178,7 +183,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                               if (!email.endsWith('@vit.edu')) {
                                 return 'Only @vit.edu emails are allowed (e.g. name@vit.edu)';
                               }
-                              if (email == '@vit.edu' || !email.contains(RegExp(r'^.+@vit\.edu$'))) {
+                              if (email == '@vit.edu' ||
+                                  !email.contains(RegExp(r'^.+@vit\.edu$'))) {
                                 return 'Please enter a valid @vit.edu email';
                               }
                               return null;
@@ -199,7 +205,10 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                               if (value == null || value.trim().isEmpty) {
                                 return 'Please enter your phone number';
                               }
-                              if (value.replaceAll(RegExp(r'[^0-9]'), '').length < 10) {
+                              if (value
+                                      .replaceAll(RegExp(r'[^0-9]'), '')
+                                      .length <
+                                  10) {
                                 return 'Please enter a valid 10-digit phone number';
                               }
                               return null;
@@ -247,28 +256,52 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                           DropdownButtonFormField<String>(
                             value: _selectedGender,
                             decoration: InputDecoration(
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
                               border: OutlineInputBorder(
                                 borderRadius: AppSpacing.radiusMd,
-                                borderSide: const BorderSide(color: AppColors.border),
+                                borderSide: const BorderSide(
+                                  color: AppColors.border,
+                                ),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: AppSpacing.radiusMd,
-                                borderSide: const BorderSide(color: AppColors.border),
+                                borderSide: const BorderSide(
+                                  color: AppColors.border,
+                                ),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: AppSpacing.radiusMd,
-                                borderSide: const BorderSide(color: AppColors.primary, width: 2),
+                                borderSide: const BorderSide(
+                                  color: AppColors.primary,
+                                  width: 2,
+                                ),
                               ),
                             ),
                             items: const [
-                              DropdownMenuItem(value: 'prefer_not_to_say', child: Text('Prefer not to say')),
-                              DropdownMenuItem(value: 'female', child: Text('Female')),
-                              DropdownMenuItem(value: 'male', child: Text('Male')),
-                              DropdownMenuItem(value: 'other', child: Text('Other')),
+                              DropdownMenuItem(
+                                value: 'prefer_not_to_say',
+                                child: Text('Prefer not to say'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'female',
+                                child: Text('Female'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'male',
+                                child: Text('Male'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'other',
+                                child: Text('Other'),
+                              ),
                             ],
                             onChanged: (val) {
-                              if (val != null) setState(() => _selectedGender = val);
+                              if (val != null) {
+                                setState(() => _selectedGender = val);
+                              }
                             },
                           ),
 

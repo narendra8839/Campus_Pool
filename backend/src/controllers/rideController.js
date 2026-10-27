@@ -2,6 +2,8 @@ const prisma = require('../config/prisma');
 const { priceRide } = require('../services/ridePricingService');
 const { RoutingError } = require('../services/osrmService');
 const { rankRides } = require('../services/ncfService');
+const { withoutVerificationOtp } = require('../utils/bookingPrivacy');
+const { canTransitionRideStatus } = require('../utils/rideLifecycle');
 
 const routeInclude = {
   corridor: {
@@ -14,6 +16,8 @@ const routeInclude = {
 };
 
 const RIDE_GENDER_PREFERENCES = new Set(['any', 'male', 'female', 'other']);
+// Treat two offers less than 90 minutes apart as potentially overlapping.
+const RIDE_DEPARTURE_BUFFER_MS = 90 * 60 * 1000;
 
 // @desc    Create / Offer a new ride
 // @route   POST /api/rides
@@ -227,7 +231,32 @@ const createRide = async (req, res, next) => {
       waypoints,
     });
 
-    const ride = await prisma.ride.create({
+    const ride = await prisma.$transaction(async (tx) => {
+      // Serialize ride offers per biker so simultaneous submissions cannot
+      // both pass the overlap check.
+      const lockKey = `ride-offer:${req.user.id}`;
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+
+      const nearbyRide = await tx.ride.findFirst({
+        where: {
+          driverId: req.user.id,
+          OR: [
+            { status: 'ONGOING' },
+            {
+              status: 'SCHEDULED',
+              departureTime: {
+                gte: new Date(depDate.getTime() - RIDE_DEPARTURE_BUFFER_MS),
+                lte: new Date(depDate.getTime() + RIDE_DEPARTURE_BUFFER_MS),
+              },
+            },
+          ],
+        },
+        select: { id: true, departureTime: true, status: true },
+      });
+
+      if (nearbyRide) return null;
+
+      return tx.ride.create({
       data: {
         driverId: req.user.id,
         ...routeLinks,
@@ -255,14 +284,12 @@ const createRide = async (req, res, next) => {
           select: {
             id: true,
             name: true,
-            phone: true,
             ratingAvg: true,
             ratingCount: true,
             gender: true,
             isVerified: true,
             avatar: true,
             college: true,
-            rollNumber: true,
             vehicleType: true,
             vehicleModel: true,
             vehiclePlate: true,
@@ -270,6 +297,14 @@ const createRide = async (req, res, next) => {
         },
       },
     });
+    });
+
+    if (!ride) {
+      return res.status(409).json({
+        success: false,
+        message: 'You already have an ongoing ride or another ride scheduled within 90 minutes.',
+      });
+    }
 
     res.status(201).json({
       success: true,
@@ -377,10 +412,8 @@ const searchRides = async (req, res, next) => {
             select: {
               id: true,
               name: true,
-              phone: true,
               avatar: true,
               college: true,
-              rollNumber: true,
               gender: true,
               ratingAvg: true,
               ratingCount: true,
@@ -435,7 +468,6 @@ const getRideById = async (req, res, next) => {
             vehicleType: true,
             vehicleModel: true,
             vehiclePlate: true,
-            emergencyPhone: true,
           },
         },
         bookings: {
@@ -445,15 +477,12 @@ const getRideById = async (req, res, next) => {
               select: {
                 id: true,
                 name: true,
-                phone: true,
                 avatar: true,
                 ratingAvg: true,
-                rollNumber: true,
                 gender: true,
                 ratingCount: true,
                 isVerified: true,
                 college: true,
-                emergencyPhone: true,
               },
             },
           },
@@ -470,7 +499,10 @@ const getRideById = async (req, res, next) => {
 
     res.json({
       success: true,
-      data: ride,
+      data: {
+        ...ride,
+        bookings: ride.bookings.map(withoutVerificationOtp),
+      },
     });
   } catch (error) {
     next(error);
@@ -512,7 +544,10 @@ const getMyOfferedRides = async (req, res, next) => {
     res.json({
       success: true,
       count: rides.length,
-      data: rides,
+      data: rides.map((ride) => ({
+        ...ride,
+        bookings: ride.bookings.map(withoutVerificationOtp),
+      })),
     });
   } catch (error) {
     next(error);
@@ -553,11 +588,23 @@ const updateRideStatus = async (req, res, next) => {
     }
 
     // Atomic update of ride and associated bookings
+    if (!canTransitionRideStatus(ride.status, status)) {
+      return res.status(409).json({
+        success: false,
+        message: `Ride cannot transition from ${ride.status} to ${status}.`,
+      });
+    }
+
     const result = await prisma.$transaction(async (tx) => {
-      const updatedRide = await tx.ride.update({
-        where: { id: req.params.id },
+      const updated = await tx.ride.updateMany({
+        where: { id: req.params.id, status: ride.status },
         data: { status },
       });
+      if (updated.count !== 1) {
+        const error = new Error('Ride status changed. Refresh and try again.');
+        error.statusCode = 409;
+        throw error;
+      }
 
       if (status === 'COMPLETED') {
         await tx.booking.updateMany({
@@ -571,7 +618,7 @@ const updateRideStatus = async (req, res, next) => {
         });
       }
 
-      return updatedRide;
+      return tx.ride.findUnique({ where: { id: req.params.id } });
     });
 
     res.json({
@@ -580,6 +627,9 @@ const updateRideStatus = async (req, res, next) => {
       data: result,
     });
   } catch (error) {
+    if (error.statusCode === 409) {
+      return res.status(409).json({ success: false, message: error.message });
+    }
     next(error);
   }
 };
@@ -607,18 +657,30 @@ const cancelRide = async (req, res, next) => {
       });
     }
 
+    if (!canTransitionRideStatus(ride.status, 'CANCELLED')) {
+      return res.status(409).json({
+        success: false,
+        message: `A ${ride.status.toLowerCase()} ride cannot be cancelled.`,
+      });
+    }
+
     const updatedRide = await prisma.$transaction(async (tx) => {
-      const cancelled = await tx.ride.update({
-        where: { id: req.params.id },
+      const updated = await tx.ride.updateMany({
+        where: { id: req.params.id, status: ride.status },
         data: { status: 'CANCELLED' },
       });
+      if (updated.count !== 1) {
+        const error = new Error('Ride status changed. Refresh and try again.');
+        error.statusCode = 409;
+        throw error;
+      }
 
       await tx.booking.updateMany({
         where: { rideId: ride.id, status: { in: ['PENDING', 'ACCEPTED'] } },
         data: { status: 'CANCELLED' },
       });
 
-      return cancelled;
+      return tx.ride.findUnique({ where: { id: req.params.id } });
     });
 
     res.json({
@@ -627,6 +689,9 @@ const cancelRide = async (req, res, next) => {
       data: updatedRide,
     });
   } catch (error) {
+    if (error.statusCode === 409) {
+      return res.status(409).json({ success: false, message: error.message });
+    }
     next(error);
   }
 };

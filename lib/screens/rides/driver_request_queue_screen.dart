@@ -297,30 +297,35 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                 children: [
                   // Modal Header
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: const BoxDecoration(
-                              color: AppColors.secondaryTint,
-                              shape: BoxShape.circle,
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: const BoxDecoration(
+                                color: AppColors.secondaryTint,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.check_circle_outline_rounded,
+                                color: AppColors.secondary,
+                                size: 24,
+                              ),
                             ),
-                            child: const Icon(
-                              Icons.check_circle_outline_rounded,
-                              color: AppColors.secondary,
-                              size: 24,
+                            const SizedBox(width: AppSpacing.sm),
+                            Expanded(
+                              child: Text(
+                                'Accept Passenger Request',
+                                style: AppTypography.headlineSm.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: AppSpacing.sm),
-                          Text(
-                            'Accept Passenger Request',
-                            style: AppTypography.headlineSm.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                       IconButton(
                         icon: const Icon(Icons.close),
@@ -412,15 +417,17 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
                                   : AppColors.error,
                             ),
                             const SizedBox(width: 6),
-                            Text(
-                              remainingSeats >= 0
-                                  ? '$remainingSeats open seat(s) remaining after accepting'
-                                  : 'Warning: Exceeds current available seats ($remainingSeats)',
-                              style: AppTypography.caption.copyWith(
-                                fontWeight: FontWeight.w600,
-                                color: remainingSeats >= 0
-                                    ? AppColors.secondary
-                                    : AppColors.error,
+                            Expanded(
+                              child: Text(
+                                remainingSeats >= 0
+                                    ? '$remainingSeats open seat(s) remaining after accepting'
+                                    : 'Warning: Exceeds current available seats ($remainingSeats)',
+                                style: AppTypography.caption.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: remainingSeats >= 0
+                                      ? AppColors.secondary
+                                      : AppColors.error,
+                                ),
                               ),
                             ),
                           ],
@@ -575,183 +582,192 @@ class _DriverRequestQueueScreenState extends State<DriverRequestQueueScreen>
               AppSpacing.marginMobile,
               MediaQuery.of(context).viewInsets.bottom + AppSpacing.lg,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: const BoxDecoration(
-                            color: AppColors.errorTint,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.cancel_outlined,
-                            color: AppColors.error,
-                            size: 24,
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        Text(
-                          'Decline Request',
-                          style: AppTypography.headlineSm.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(sheetContext),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  'Let the seeker know why you cannot accept their request.',
-                  style: AppTypography.bodyMd.copyWith(
-                    color: AppColors.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-
-                // Quick Reason Chips
-                Text(
-                  'SELECT A REASON',
-                  style: AppTypography.caption.copyWith(
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.8,
-                    color: AppColors.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: reasons.map((reason) {
-                    final isSelected = selectedReason == reason;
-                    return ChoiceChip(
-                      label: Text(reason),
-                      selected: isSelected,
-                      selectedColor: AppColors.errorContainer,
-                      labelStyle: TextStyle(
-                        color: isSelected
-                            ? AppColors.error
-                            : AppColors.onSurface,
-                        fontWeight: isSelected
-                            ? FontWeight.bold
-                            : FontWeight.normal,
-                        fontSize: 12,
-                      ),
-                      onSelected: (selected) {
-                        if (selected) {
-                          setModalState(() {
-                            selectedReason = reason;
-                          });
-                        }
-                      },
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: AppSpacing.md),
-
-                // Custom note
-                AppTextField(
-                  controller: noteController,
-                  label: 'Additional Note (Optional)',
-                  hintText: 'Provide extra details if necessary...',
-                  maxLines: 2,
-                ),
-                const SizedBox(height: AppSpacing.lg),
-
-                // Action Buttons
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: AppSpacing.radiusMd,
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                        onPressed: () => Navigator.pop(sheetContext),
-                        child: const Text('Cancel'),
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.error,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: AppSpacing.radiusMd,
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                        onPressed: isProcessing
-                            ? null
-                            : () async {
-                                setModalState(() => isProcessing = true);
-                                final navigator = Navigator.of(sheetContext);
-                                final messenger = ScaffoldMessenger.of(context);
-
-                                final note =
-                                    noteController.text.trim().isNotEmpty
-                                    ? '$selectedReason - ${noteController.text.trim()}'
-                                    : selectedReason;
-
-                                try {
-                                  await BookingService.respondToBookingRequest(
-                                    booking.id,
-                                    'REJECTED',
-                                    driverResponseNote: note,
-                                  );
-                                  if (!mounted) return;
-                                  navigator.pop();
-                                  messenger.showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Request declined.'),
-                                      backgroundColor:
-                                          AppColors.onSurfaceVariant,
-                                    ),
-                                  );
-                                  _loadQueueData();
-                                } catch (e) {
-                                  setModalState(() => isProcessing = false);
-                                  if (!mounted) return;
-                                  messenger.showSnackBar(
-                                    SnackBar(
-                                      content: Text('Failed to decline: $e'),
-                                      backgroundColor: AppColors.error,
-                                    ),
-                                  );
-                                }
-                              },
-                        child: isProcessing
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                    Colors.white,
-                                  ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: const BoxDecoration(
+                                color: AppColors.errorTint,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.cancel_outlined,
+                                color: AppColors.error,
+                                size: 24,
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.sm),
+                            Expanded(
+                              child: Text(
+                                'Decline Request',
+                                style: AppTypography.headlineSm.copyWith(
+                                  fontWeight: FontWeight.bold,
                                 ),
-                              )
-                            : const Text('Confirm Decline'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(sheetContext),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Let the seeker know why you cannot accept their request.',
+                    style: AppTypography.bodyMd.copyWith(
+                      color: AppColors.onSurfaceVariant,
                     ),
-                  ],
-                ),
-              ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+
+                  // Quick Reason Chips
+                  Text(
+                    'SELECT A REASON',
+                    style: AppTypography.caption.copyWith(
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.8,
+                      color: AppColors.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: reasons.map((reason) {
+                      final isSelected = selectedReason == reason;
+                      return ChoiceChip(
+                        label: Text(reason),
+                        selected: isSelected,
+                        selectedColor: AppColors.errorContainer,
+                        labelStyle: TextStyle(
+                          color: isSelected
+                              ? AppColors.error
+                              : AppColors.onSurface,
+                          fontWeight: isSelected
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                          fontSize: 12,
+                        ),
+                        onSelected: (selected) {
+                          if (selected) {
+                            setModalState(() {
+                              selectedReason = reason;
+                            });
+                          }
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+
+                  // Custom note
+                  AppTextField(
+                    controller: noteController,
+                    label: 'Additional Note (Optional)',
+                    hintText: 'Provide extra details if necessary...',
+                    maxLines: 2,
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+
+                  // Action Buttons
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: AppSpacing.radiusMd,
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          onPressed: () => Navigator.pop(sheetContext),
+                          child: const Text('Cancel'),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.error,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: AppSpacing.radiusMd,
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          onPressed: isProcessing
+                              ? null
+                              : () async {
+                                  setModalState(() => isProcessing = true);
+                                  final navigator = Navigator.of(sheetContext);
+                                  final messenger = ScaffoldMessenger.of(
+                                    context,
+                                  );
+
+                                  final note =
+                                      noteController.text.trim().isNotEmpty
+                                      ? '$selectedReason - ${noteController.text.trim()}'
+                                      : selectedReason;
+
+                                  try {
+                                    await BookingService.respondToBookingRequest(
+                                      booking.id,
+                                      'REJECTED',
+                                      driverResponseNote: note,
+                                    );
+                                    if (!mounted) return;
+                                    navigator.pop();
+                                    messenger.showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Request declined.'),
+                                        backgroundColor:
+                                            AppColors.onSurfaceVariant,
+                                      ),
+                                    );
+                                    _loadQueueData();
+                                  } catch (e) {
+                                    setModalState(() => isProcessing = false);
+                                    if (!mounted) return;
+                                    messenger.showSnackBar(
+                                      SnackBar(
+                                        content: Text('Failed to decline: $e'),
+                                        backgroundColor: AppColors.error,
+                                      ),
+                                    );
+                                  }
+                                },
+                          child: isProcessing
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white,
+                                    ),
+                                  ),
+                                )
+                              : const Text('Confirm Decline'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           );
         },

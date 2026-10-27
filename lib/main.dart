@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'models/user_model.dart';
 import 'routes/app_navigator.dart';
 import 'routes/app_routes.dart';
@@ -12,12 +13,14 @@ import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
 
   // Hybrid composition causes overlay buffer allocation failures (Gralloc4/AHardwareBuffer)
   // on Android 14 with Impeller, which hides Flutter UI elements drawn over the map.
   // Using texture composition (false) allows Flutter to composite overlays properly.
   MapLibreMap.useHybridComposition = false;
   ApiService.onUnauthorized = _handleExpiredSession;
+  ApiService.idTokenProvider = AuthService.getIdToken;
   runApp(const CampusPoolApp());
 }
 
