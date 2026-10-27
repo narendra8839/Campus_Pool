@@ -111,12 +111,13 @@ matching `google-services.json`; configure each additional platform with its
 own Firebase app configuration before building for it.
 
 Firebase accounts are added to the application database only after email
-verification. Existing synthetic/legacy rows are preserved and are never
-automatically linked to Firebase identities. Before deployment, apply the
-additive Prisma schema change for `users.firebaseUid` and nullable
-`users.password` to the intended database. Confirm the target and back it up
-before running `npx prisma db push`; do not point schema changes at production
-unintentionally.
+verification. If an existing profile has the same exact email and no Firebase
+UID, the verified Firebase identity is linked to that profile so its existing
+ride and booking history remains intact. Profiles already linked to another
+Firebase UID are never reassigned. Before deployment, apply the additive Prisma
+schema change for `users.firebaseUid` and nullable `users.password` to the
+intended database. Confirm the target and back it up before running
+`npx prisma db push`; do not point schema changes at production unintentionally.
 
 If Neon closes an idle pooled connection, restart the backend; startup retries
 the database connection up to three times before failing clearly. For local

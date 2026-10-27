@@ -101,13 +101,38 @@ test('returns an existing profile by Firebase UID without creating a duplicate',
   }
 });
 
-test('does not link a Firebase UID to an existing synthetic profile by email', async () => {
+test('links a verified Firebase identity to an existing profile by exact email', async () => {
   const originalFindUnique = prisma.user.findUnique;
+  const originalUpdateMany = prisma.user.updateMany;
   const originalCreate = prisma.user.create;
-  prisma.user.findUnique = async ({ where }) =>
-    where.firebaseUid ? null : { id: 'synthetic-profile' };
+  const existingProfile = {
+    id: 'existing-profile',
+    email: 'student@vit.edu',
+    firebaseUid: null,
+    isVerified: false,
+  };
+  const linkedProfile = {
+    ...existingProfile,
+    firebaseUid: 'firebase-user-1',
+    isVerified: true,
+  };
+  let linkQuery;
+  let isLinked = false;
+  prisma.user.findUnique = async ({ where }) => {
+    if (where.firebaseUid) {
+      return isLinked && where.firebaseUid === linkedProfile.firebaseUid
+        ? linkedProfile
+        : null;
+    }
+    return where.email ? existingProfile : null;
+  };
+  prisma.user.updateMany = async (query) => {
+    linkQuery = query;
+    isLinked = true;
+    return { count: 1 };
+  };
   prisma.user.create = async () => {
-    throw new Error('Should not link an existing profile.');
+    throw new Error('Should link, not create, an existing profile.');
   };
 
   try {
@@ -118,11 +143,51 @@ test('does not link a Firebase UID to an existing synthetic profile by email', a
     }, res, (error) => {
       if (error) throw error;
     });
-    assert.equal(res.statusCode, 409);
-    assert.match(res.body.message, /not automatically linked/);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.data, linkedProfile);
+    assert.deepEqual(linkQuery.where, {
+      id: 'existing-profile',
+      email: 'student@vit.edu',
+      firebaseUid: null,
+    });
+    assert.deepEqual(linkQuery.data, {
+      firebaseUid: 'firebase-user-1',
+      isVerified: true,
+    });
   } finally {
     prisma.user.findUnique = originalFindUnique;
+    prisma.user.updateMany = originalUpdateMany;
     prisma.user.create = originalCreate;
+  }
+});
+
+test('does not link a profile already attached to another Firebase identity', async () => {
+  const originalFindUnique = prisma.user.findUnique;
+  const originalUpdateMany = prisma.user.updateMany;
+  const existingProfile = {
+    id: 'existing-profile',
+    email: 'student@vit.edu',
+    firebaseUid: 'different-firebase-user',
+  };
+  prisma.user.findUnique = async ({ where }) =>
+    where.firebaseUid === 'firebase-user-1' ? null : existingProfile;
+  prisma.user.updateMany = async () => {
+    throw new Error('Must not replace another Firebase identity.');
+  };
+
+  try {
+    const res = responseRecorder();
+    await provisionFirebaseProfile({
+    firebaseIdentity: verifiedIdentity(),
+    body: {},
+    }, res, (error) => {
+    if (error) throw error;
+    });
+    assert.equal(res.statusCode, 409);
+    assert.match(res.body.message, /linked to another Firebase account/);
+  } finally {
+    prisma.user.findUnique = originalFindUnique;
+    prisma.user.updateMany = originalUpdateMany;
   }
 });
 

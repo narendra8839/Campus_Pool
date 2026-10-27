@@ -67,12 +67,55 @@ async function provisionFirebaseProfile(req, res, next) {
 
     const existingByEmail = await prisma.user.findUnique({
       where: { email: validation.email },
-      select: { id: true },
+      select: { id: true, firebaseUid: true },
     });
     if (existingByEmail) {
-      return res.status(409).json({
-        success: false,
-        message: 'This email is already attached to an existing account. Contact support; accounts are not automatically linked.',
+      if (existingByEmail.firebaseUid === identity.uid) {
+        return res.json({ success: true, data: existingByEmail });
+      }
+
+      if (existingByEmail.firebaseUid) {
+        return res.status(409).json({
+          success: false,
+          message: 'This email is already linked to another Firebase account. Contact support.',
+        });
+      }
+
+      const linkResult = await prisma.user.updateMany({
+        where: {
+          id: existingByEmail.id,
+          email: validation.email,
+          firebaseUid: null,
+        },
+        data: {
+          firebaseUid: identity.uid,
+          isVerified: true,
+        },
+      });
+
+      if (linkResult.count !== 1) {
+        const linkedProfile = await prisma.user.findUnique({
+          where: { firebaseUid: identity.uid },
+          select: PROFILE_SELECT,
+        });
+        if (linkedProfile?.email.toLowerCase() === validation.email) {
+          return res.json({ success: true, data: linkedProfile });
+        }
+
+        return res.status(409).json({
+          success: false,
+          message: 'This account changed while it was being linked. Please try again or contact support.',
+        });
+      }
+
+      const linkedProfile = await prisma.user.findUnique({
+        where: { firebaseUid: identity.uid },
+        select: PROFILE_SELECT,
+      });
+      return res.json({
+        success: true,
+        message: 'Your verified Firebase account is linked to your existing profile.',
+        data: linkedProfile,
       });
     }
 
